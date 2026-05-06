@@ -1,0 +1,688 @@
+package db
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/kayushkin/kanban-store/internal/model"
+	_ "github.com/mattn/go-sqlite3"
+)
+
+var ErrNotFound = errors.New("not found")
+
+type Store struct {
+	db *sql.DB
+}
+
+func New(dbPath string) (*Store, error) {
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("create db dir: %w", err)
+	}
+
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on")
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+func (s *Store) Close() error { return s.db.Close() }
+
+func migrate(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS boards (
+			id          TEXT PRIMARY KEY,
+			name        TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			archived    INTEGER NOT NULL DEFAULT 0,
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_boards_archived ON boards(archived);
+
+		CREATE TABLE IF NOT EXISTS columns (
+			id          TEXT PRIMARY KEY,
+			board_id    TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			position    REAL NOT NULL,
+			color       TEXT DEFAULT '',
+			wip_limit   INTEGER,
+			auto_status TEXT,
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_columns_board ON columns(board_id, position);
+
+		CREATE TABLE IF NOT EXISTS placements (
+			card_id     TEXT NOT NULL,
+			board_id    TEXT NOT NULL REFERENCES boards(id)  ON DELETE CASCADE,
+			column_id   TEXT NOT NULL REFERENCES columns(id) ON DELETE CASCADE,
+			position    REAL NOT NULL,
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL,
+			PRIMARY KEY (card_id, board_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_placements_board   ON placements(board_id, column_id, position);
+		CREATE INDEX IF NOT EXISTS idx_placements_column  ON placements(column_id, position);
+		CREATE INDEX IF NOT EXISTS idx_placements_card    ON placements(card_id);
+
+		CREATE TABLE IF NOT EXISTS card_links (
+			id          TEXT PRIMARY KEY,
+			card_id     TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_ref  TEXT NOT NULL,
+			label       TEXT DEFAULT '',
+			created_at  DATETIME NOT NULL,
+			UNIQUE (card_id, entity_type, entity_ref)
+		);
+		CREATE INDEX IF NOT EXISTS idx_card_links_card   ON card_links(card_id);
+		CREATE INDEX IF NOT EXISTS idx_card_links_entity ON card_links(entity_type, entity_ref);
+
+		CREATE TABLE IF NOT EXISTS entity_tags (
+			entity_type TEXT NOT NULL,
+			entity_ref  TEXT NOT NULL,
+			tag         TEXT NOT NULL,
+			created_at  DATETIME NOT NULL,
+			PRIMARY KEY (entity_type, entity_ref, tag)
+		);
+		CREATE INDEX IF NOT EXISTS idx_entity_tags_tag    ON entity_tags(tag);
+		CREATE INDEX IF NOT EXISTS idx_entity_tags_entity ON entity_tags(entity_type, entity_ref);
+	`)
+	return err
+}
+
+func now() time.Time { return time.Now().UTC() }
+
+// ============================ Boards ============================
+
+func (s *Store) CreateBoard(req *model.CreateBoardRequest) (*model.Board, error) {
+	b := &model.Board{
+		ID:        uuid.NewString(),
+		Name:      req.Name,
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	if req.Description != nil {
+		b.Description = *req.Description
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO boards (id, name, description, archived, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+		b.ID, b.Name, b.Description, b.CreatedAt, b.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (s *Store) ListBoards(includeArchived bool) ([]*model.Board, error) {
+	q := `SELECT id, name, description, archived, created_at, updated_at FROM boards`
+	if !includeArchived {
+		q += ` WHERE archived = 0`
+	}
+	q += ` ORDER BY created_at DESC`
+	rows, err := s.db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Board
+	for rows.Next() {
+		b := &model.Board{}
+		var arch int
+		if err := rows.Scan(&b.ID, &b.Name, &b.Description, &arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, err
+		}
+		b.Archived = arch != 0
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetBoard(id string) (*model.Board, error) {
+	b := &model.Board{}
+	var arch int
+	err := s.db.QueryRow(
+		`SELECT id, name, description, archived, created_at, updated_at FROM boards WHERE id = ?`, id,
+	).Scan(&b.ID, &b.Name, &b.Description, &arch, &b.CreatedAt, &b.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	b.Archived = arch != 0
+	return b, nil
+}
+
+func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Board, error) {
+	b, err := s.GetBoard(id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != nil {
+		b.Name = *req.Name
+	}
+	if req.Description != nil {
+		b.Description = *req.Description
+	}
+	if req.Archived != nil {
+		b.Archived = *req.Archived
+	}
+	b.UpdatedAt = now()
+	arch := 0
+	if b.Archived {
+		arch = 1
+	}
+	_, err = s.db.Exec(
+		`UPDATE boards SET name=?, description=?, archived=?, updated_at=? WHERE id=?`,
+		b.Name, b.Description, arch, b.UpdatedAt, id,
+	)
+	return b, err
+}
+
+func (s *Store) DeleteBoard(id string) error {
+	res, err := s.db.Exec(`DELETE FROM boards WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ============================ Columns ============================
+
+func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*model.Column, error) {
+	if _, err := s.GetBoard(boardID); err != nil {
+		return nil, err
+	}
+	pos := 0.0
+	if req.Position != nil {
+		pos = *req.Position
+	} else {
+		// Append: max(position) + 1
+		var maxPos sql.NullFloat64
+		s.db.QueryRow(`SELECT MAX(position) FROM columns WHERE board_id = ?`, boardID).Scan(&maxPos)
+		if maxPos.Valid {
+			pos = maxPos.Float64 + 1.0
+		}
+	}
+	c := &model.Column{
+		ID:         uuid.NewString(),
+		BoardID:    boardID,
+		Name:       req.Name,
+		Position:   pos,
+		WIPLimit:   req.WIPLimit,
+		AutoStatus: req.AutoStatus,
+		CreatedAt:  now(),
+		UpdatedAt:  now(),
+	}
+	if req.Color != nil {
+		c.Color = *req.Color
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, c.CreatedAt, c.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
+	rows, err := s.db.Query(
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at
+		 FROM columns WHERE board_id = ? ORDER BY position ASC`, boardID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Column
+	for rows.Next() {
+		c, err := scanColumn(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetColumn(id string) (*model.Column, error) {
+	row := s.db.QueryRow(
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at
+		 FROM columns WHERE id = ?`, id,
+	)
+	c, err := scanColumn(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
+}
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanColumn(r scanner) (*model.Column, error) {
+	c := &model.Column{}
+	var wip sql.NullInt64
+	var auto sql.NullString
+	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if wip.Valid {
+		v := int(wip.Int64)
+		c.WIPLimit = &v
+	}
+	if auto.Valid {
+		v := auto.String
+		c.AutoStatus = &v
+	}
+	return c, nil
+}
+
+func (s *Store) UpdateColumn(id string, req *model.UpdateColumnRequest) (*model.Column, error) {
+	c, err := s.GetColumn(id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != nil {
+		c.Name = *req.Name
+	}
+	if req.Position != nil {
+		c.Position = *req.Position
+	}
+	if req.Color != nil {
+		c.Color = *req.Color
+	}
+	if req.WIPLimit != nil {
+		c.WIPLimit = req.WIPLimit
+	}
+	if req.AutoStatus != nil {
+		c.AutoStatus = req.AutoStatus
+	}
+	c.UpdatedAt = now()
+	_, err = s.db.Exec(
+		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, updated_at=? WHERE id=?`,
+		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, c.UpdatedAt, id,
+	)
+	return c, err
+}
+
+func (s *Store) DeleteColumn(id string) error {
+	res, err := s.db.Exec(`DELETE FROM columns WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ============================ Placements ============================
+
+// AttachCard inserts (card_id, board_id) -> (column_id, position). Idempotent
+// per (card_id, board_id) — re-attaching the same card to the same board
+// updates the placement (acts like a move).
+func (s *Store) AttachCard(boardID, cardID string, req *model.AttachCardRequest) (*model.Placement, error) {
+	col, err := s.GetColumn(req.ColumnID)
+	if err != nil {
+		return nil, err
+	}
+	if col.BoardID != boardID {
+		return nil, fmt.Errorf("column %s does not belong to board %s", req.ColumnID, boardID)
+	}
+	pos := 0.0
+	if req.Position != nil {
+		pos = *req.Position
+	} else {
+		var maxPos sql.NullFloat64
+		s.db.QueryRow(`SELECT MAX(position) FROM placements WHERE board_id=? AND column_id=?`, boardID, req.ColumnID).Scan(&maxPos)
+		if maxPos.Valid {
+			pos = maxPos.Float64 + 1.0
+		}
+	}
+	p := &model.Placement{
+		CardID:    cardID,
+		BoardID:   boardID,
+		ColumnID:  req.ColumnID,
+		Position:  pos,
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO placements (card_id, board_id, column_id, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(card_id, board_id) DO UPDATE SET
+			column_id  = excluded.column_id,
+			position   = excluded.position,
+			updated_at = excluded.updated_at
+	`, p.CardID, p.BoardID, p.ColumnID, p.Position, p.CreatedAt, p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Store) MoveCard(cardID string, req *model.MoveCardRequest) (*model.Placement, error) {
+	col, err := s.GetColumn(req.ColumnID)
+	if err != nil {
+		return nil, err
+	}
+	if col.BoardID != req.BoardID {
+		return nil, fmt.Errorf("column %s does not belong to board %s", req.ColumnID, req.BoardID)
+	}
+	res, err := s.db.Exec(`
+		UPDATE placements SET column_id=?, position=?, updated_at=?
+		WHERE card_id=? AND board_id=?`,
+		req.ColumnID, req.Position, now(), cardID, req.BoardID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	return s.GetPlacement(cardID, req.BoardID)
+}
+
+func (s *Store) GetPlacement(cardID, boardID string) (*model.Placement, error) {
+	p := &model.Placement{}
+	err := s.db.QueryRow(
+		`SELECT card_id, board_id, column_id, position, created_at, updated_at
+		 FROM placements WHERE card_id=? AND board_id=?`, cardID, boardID,
+	).Scan(&p.CardID, &p.BoardID, &p.ColumnID, &p.Position, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return p, err
+}
+
+func (s *Store) ListPlacementsByBoard(boardID string) ([]*model.Placement, error) {
+	rows, err := s.db.Query(
+		`SELECT card_id, board_id, column_id, position, created_at, updated_at
+		 FROM placements WHERE board_id=? ORDER BY column_id, position ASC`, boardID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Placement
+	for rows.Next() {
+		p := &model.Placement{}
+		if err := rows.Scan(&p.CardID, &p.BoardID, &p.ColumnID, &p.Position, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListPlacementsByCard(cardID string) ([]*model.Placement, error) {
+	rows, err := s.db.Query(
+		`SELECT card_id, board_id, column_id, position, created_at, updated_at
+		 FROM placements WHERE card_id=?`, cardID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Placement
+	for rows.Next() {
+		p := &model.Placement{}
+		if err := rows.Scan(&p.CardID, &p.BoardID, &p.ColumnID, &p.Position, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// DetachCard removes a single (card_id, board_id) placement.
+func (s *Store) DetachCard(boardID, cardID string) error {
+	res, err := s.db.Exec(`DELETE FROM placements WHERE card_id=? AND board_id=?`, cardID, boardID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DetachCardEverywhere removes all placements for a card across all boards.
+// Used when the underlying noteboard item is hard-deleted.
+func (s *Store) DetachCardEverywhere(cardID string) error {
+	_, err := s.db.Exec(`DELETE FROM placements WHERE card_id=?`, cardID)
+	return err
+}
+
+// CountColumnCards returns how many cards currently sit in a column. Used to
+// enforce WIP limits on the API edge.
+func (s *Store) CountColumnCards(columnID string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM placements WHERE column_id=?`, columnID).Scan(&n)
+	return n, err
+}
+
+// ============================ Card links ============================
+
+func (s *Store) CreateCardLink(cardID string, req *model.CreateCardLinkRequest) (*model.CardLink, error) {
+	l := &model.CardLink{
+		ID:         uuid.NewString(),
+		CardID:     cardID,
+		EntityType: req.EntityType,
+		EntityRef:  req.EntityRef,
+		CreatedAt:  now(),
+	}
+	if req.Label != nil {
+		l.Label = *req.Label
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO card_links (id, card_id, entity_type, entity_ref, label, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(card_id, entity_type, entity_ref) DO UPDATE SET label=excluded.label`,
+		l.ID, l.CardID, l.EntityType, l.EntityRef, l.Label, l.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+func (s *Store) ListCardLinks(cardID string) ([]model.CardLink, error) {
+	rows, err := s.db.Query(
+		`SELECT id, card_id, entity_type, entity_ref, label, created_at
+		 FROM card_links WHERE card_id=? ORDER BY created_at ASC`, cardID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.CardLink
+	for rows.Next() {
+		var l model.CardLink
+		if err := rows.Scan(&l.ID, &l.CardID, &l.EntityType, &l.EntityRef, &l.Label, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteCardLink(linkID string) error {
+	res, err := s.db.Exec(`DELETE FROM card_links WHERE id=?`, linkID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListCardsByEntity returns all card_ids linked to a given entity. Caller
+// joins these with placements / noteboard for full views.
+func (s *Store) ListCardsByEntity(entityType, entityRef string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT card_id FROM card_links WHERE entity_type=? AND entity_ref=?`,
+		entityType, entityRef,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// ============================ Entity tags ============================
+
+func (s *Store) AddEntityTag(entityType, entityRef, tag string) (*model.EntityTag, error) {
+	t := &model.EntityTag{
+		EntityType: entityType,
+		EntityRef:  entityRef,
+		Tag:        tag,
+		CreatedAt:  now(),
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO entity_tags (entity_type, entity_ref, tag, created_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(entity_type, entity_ref, tag) DO NOTHING`,
+		t.EntityType, t.EntityRef, t.Tag, t.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Store) ListEntityTags(entityType, entityRef string) ([]model.EntityTag, error) {
+	rows, err := s.db.Query(
+		`SELECT entity_type, entity_ref, tag, created_at FROM entity_tags
+		 WHERE entity_type=? AND entity_ref=? ORDER BY tag ASC`,
+		entityType, entityRef,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.EntityTag
+	for rows.Next() {
+		var t model.EntityTag
+		if err := rows.Scan(&t.EntityType, &t.EntityRef, &t.Tag, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteEntityTag(entityType, entityRef, tag string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM entity_tags WHERE entity_type=? AND entity_ref=? AND tag=?`,
+		entityType, entityRef, tag,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// FindEntitiesByTag returns (entity_type, entity_ref) pairs that carry a tag.
+// If entityType is empty, searches across all types.
+func (s *Store) FindEntitiesByTag(tag, entityType string) ([]model.EntityTag, error) {
+	q := `SELECT entity_type, entity_ref, tag, created_at FROM entity_tags WHERE tag = ?`
+	args := []any{tag}
+	if entityType != "" {
+		q += ` AND entity_type = ?`
+		args = append(args, entityType)
+	}
+	q += ` ORDER BY entity_type, entity_ref`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.EntityTag
+	for rows.Next() {
+		var t model.EntityTag
+		if err := rows.Scan(&t.EntityType, &t.EntityRef, &t.Tag, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListAllEntityTags returns the set of unique tags in use across all entities,
+// with a count of how many (entity_type, entity_ref) pairs carry each tag.
+func (s *Store) ListAllEntityTags() ([]model.TagCount, error) {
+	rows, err := s.db.Query(
+		`SELECT tag, COUNT(*) FROM entity_tags GROUP BY tag ORDER BY tag ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.TagCount
+	for rows.Next() {
+		var t model.TagCount
+		if err := rows.Scan(&t.Tag, &t.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ============================ Health ============================
+
+func (s *Store) Counts() (map[string]int, error) {
+	tables := []string{"boards", "columns", "placements", "card_links", "entity_tags"}
+	out := map[string]int{}
+	for _, t := range tables {
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM " + t).Scan(&n); err != nil {
+			return nil, err
+		}
+		out[t] = n
+	}
+	return out, nil
+}
+
+// utility: stable ordering helper used for Position fan-out elsewhere
+var _ = strings.Contains
