@@ -407,6 +407,14 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		ColumnID: req.ColumnID,
 		Position: req.Position,
 	})
+	// If the destination column has auto_status, apply it now so card creation
+	// is symmetric with MoveCard (otherwise classifier-created cards in Done
+	// stay status=open in noteboard). Best-effort; failure is non-fatal.
+	if col.AutoStatus != nil && *col.AutoStatus != "" {
+		if patched, perr := a.noteboard.PatchItem(cardID, map[string]any{"status": *col.AutoStatus}); perr == nil {
+			item = patched
+		}
+	}
 	if err != nil {
 		// Best-effort cleanup: the noteboard item now exists with no placement.
 		// Leaving it in place is the safer default — user can find it on /notes.
