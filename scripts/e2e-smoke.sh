@@ -27,14 +27,14 @@
 #
 # Tunables:
 #   E2E_PORT            — kanban-store listen port (default 19107)
-#   E2E_NOTEBOARD_PORT  — stub noteboard listen port (default 19108)
+#   E2E_NOTEBOARD_PORT  — stub noteboard listen port (default 19106)
 #   E2E_KEEP            — set to "1" to leave $TMP_DIR around after the run
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${E2E_PORT:-19107}"
-NB_PORT="${E2E_NOTEBOARD_PORT:-19108}"
+NB_PORT="${E2E_NOTEBOARD_PORT:-19106}"
 BASE="http://127.0.0.1:$PORT"
 NB_BASE="http://127.0.0.1:$NB_PORT"
 # Port 1 (tcpmux) is not listening: connect() gets ECONNREFUSED immediately,
