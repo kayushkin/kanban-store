@@ -43,6 +43,9 @@ type CreateItemPayload struct {
 	// the gap between the card appearing and a human getting to the board.
 	Hold       bool   `json:"hold,omitempty"`
 	HoldReason string `json:"hold_reason,omitempty"`
+	// AutoHoldAtUSD is the spend ceiling. Pointer, because nil (no ceiling) and
+	// 0 (stop before spending a cent) are different instructions.
+	AutoHoldAtUSD *float64 `json:"auto_hold_at_usd,omitempty"`
 }
 
 func (c *Client) CreateItem(p CreateItemPayload) (Item, error) {

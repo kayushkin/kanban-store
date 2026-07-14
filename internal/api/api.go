@@ -126,11 +126,12 @@ func (a *API) boards(w http.ResponseWriter, r *http.Request) {
 }
 
 // boardsTree handles /api/boards/:id and its sub-resources.
-//   /api/boards/:id
-//   /api/boards/:id/columns
-//   /api/boards/:id/columns/reorder
-//   /api/boards/:id/cards
-//   /api/boards/:id/cards/:cardID   (PUT to attach existing card)
+//
+//	/api/boards/:id
+//	/api/boards/:id/columns
+//	/api/boards/:id/columns/reorder
+//	/api/boards/:id/cards
+//	/api/boards/:id/cards/:cardID   (PUT to attach existing card)
 func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/boards/")
 	if rest == "" {
@@ -385,15 +386,16 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 
 	// Create the noteboard item first — it's the source of truth.
 	item, err := a.noteboard.CreateItem(noteboard.CreateItemPayload{
-		Type:       "todo",
-		Title:      req.Title,
-		Body:       req.Body,
-		Tags:       req.Tags,
-		Priority:   req.Priority,
-		ListID:     req.ListID,
-		DueAt:      req.DueAt,
-		Hold:       req.Hold,
-		HoldReason: req.HoldReason,
+		Type:          "todo",
+		Title:         req.Title,
+		Body:          req.Body,
+		Tags:          req.Tags,
+		Priority:      req.Priority,
+		ListID:        req.ListID,
+		DueAt:         req.DueAt,
+		Hold:          req.Hold,
+		HoldReason:    req.HoldReason,
+		AutoHoldAtUSD: req.AutoHoldAtUSD,
 	})
 	if err != nil {
 		writeError(w, 502, "noteboard create failed: "+err.Error())
@@ -446,10 +448,11 @@ func (a *API) checkWIP(columnID string) error {
 }
 
 // ============================ Cards (single-resource) ============================
-//   /api/cards/:cardID                — PATCH (forward to noteboard) | DELETE (archive)
-//   /api/cards/:cardID/move           — POST  (move within/across columns)
-//   /api/cards/:cardID/placements     — GET   (all boards this card is on)
-//   /api/cards/:cardID/links          — GET, POST
+//
+//	/api/cards/:cardID                — PATCH (forward to noteboard) | DELETE (archive)
+//	/api/cards/:cardID/move           — POST  (move within/across columns)
+//	/api/cards/:cardID/placements     — GET   (all boards this card is on)
+//	/api/cards/:cardID/links          — GET, POST
 func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/cards/")
 	if rest == "" {
@@ -652,9 +655,10 @@ func (a *API) linkByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================ Entities ============================
-//   /api/entities/:type/:ref/cards
-//   /api/entities/:type/:ref/tags
-//   /api/entities/:type/:ref/tags/:tag
+//
+//	/api/entities/:type/:ref/cards
+//	/api/entities/:type/:ref/tags
+//	/api/entities/:type/:ref/tags/:tag
 func (a *API) entityScoped(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/entities/")
 	parts := strings.Split(rest, "/")

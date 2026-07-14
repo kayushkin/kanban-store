@@ -107,6 +107,11 @@ type CreateCardRequest struct {
 	// presses play. Opt-in, for classes of work that should never run unattended.
 	Hold       bool   `json:"hold,omitempty"`
 	HoldReason string `json:"hold_reason,omitempty"`
+	// AutoHoldAtUSD is the spend ceiling: hold this card once its agent sessions
+	// have cost this much in total. Nil = no ceiling. Zero is a REAL ceiling, so
+	// this is a pointer — a plain float64 would make "no ceiling" and "stop before
+	// spending a cent" the same request.
+	AutoHoldAtUSD *float64 `json:"auto_hold_at_usd,omitempty"`
 }
 
 func (r *CreateCardRequest) Validate() error {
@@ -201,9 +206,9 @@ func (r *CreateEntityTagRequest) Validate() error {
 // Cards are joined with their noteboard content; columns carry their cards
 // in placement order.
 type BoardView struct {
-	Board   *Board         `json:"board"`
-	Columns []ColumnView   `json:"columns"`
-	Orphans []CardView     `json:"orphans,omitempty"`
+	Board   *Board       `json:"board"`
+	Columns []ColumnView `json:"columns"`
+	Orphans []CardView   `json:"orphans,omitempty"`
 }
 
 type ColumnView struct {
