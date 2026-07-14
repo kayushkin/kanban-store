@@ -39,6 +39,10 @@ type CreateItemPayload struct {
 	Priority *int     `json:"priority,omitempty"`
 	ListID   *string  `json:"list_id,omitempty"`
 	DueAt    *string  `json:"due_at,omitempty"`
+	// Hold creates the card already parked, so no agent can pick the work up in
+	// the gap between the card appearing and a human getting to the board.
+	Hold       bool   `json:"hold,omitempty"`
+	HoldReason string `json:"hold_reason,omitempty"`
 }
 
 func (c *Client) CreateItem(p CreateItemPayload) (Item, error) {
@@ -63,6 +67,24 @@ func (c *Client) PatchItem(id string, patch map[string]any) (Item, error) {
 	}
 	req, _ := http.NewRequest("PATCH", c.BaseURL+"/api/items/"+url.PathEscape(id), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	return c.doJSON(req, http.StatusOK)
+}
+
+// HoldItem parks the card's work: agents stop seeing it, the card stays on the
+// board. Reason is optional.
+func (c *Client) HoldItem(id, reason string) (Item, error) {
+	body, err := json.Marshal(map[string]string{"reason": reason})
+	if err != nil {
+		return nil, err
+	}
+	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items/"+url.PathEscape(id)+"/hold", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return c.doJSON(req, http.StatusOK)
+}
+
+// UnholdItem clears the gate — agents may pick the work up again.
+func (c *Client) UnholdItem(id string) (Item, error) {
+	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items/"+url.PathEscape(id)+"/unhold", nil)
 	return c.doJSON(req, http.StatusOK)
 }
 
@@ -122,8 +144,13 @@ func (c *Client) GetItems(ids []string) ([]Item, error) {
 }
 
 // Search forwards a full-text query to noteboard /api/search.
+//
+// include_held is set because a kanban board is a management surface, not a
+// discovery one: the board is where a human goes to find parked work and resume
+// it. Noteboard withholds held items from agent discovery by default, and a card
+// that vanished from the board it is parked on could never be un-parked.
 func (c *Client) Search(q string, limit int) ([]Item, error) {
-	u := fmt.Sprintf("%s/api/search?q=%s", c.BaseURL, url.QueryEscape(q))
+	u := fmt.Sprintf("%s/api/search?q=%s&include_held=true", c.BaseURL, url.QueryEscape(q))
 	if limit > 0 {
 		u += "&limit=" + strconv.Itoa(limit)
 	}

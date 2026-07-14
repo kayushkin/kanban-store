@@ -103,6 +103,10 @@ type CreateCardRequest struct {
 	DueAt    *string  `json:"due_at,omitempty"`
 	ColumnID string   `json:"column_id"`
 	Position *float64 `json:"position,omitempty"`
+	// Hold creates the card parked — agents cannot pick the work up until a human
+	// presses play. Opt-in, for classes of work that should never run unattended.
+	Hold       bool   `json:"hold,omitempty"`
+	HoldReason string `json:"hold_reason,omitempty"`
 }
 
 func (r *CreateCardRequest) Validate() error {

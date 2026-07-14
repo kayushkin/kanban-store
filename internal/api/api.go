@@ -385,13 +385,15 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 
 	// Create the noteboard item first — it's the source of truth.
 	item, err := a.noteboard.CreateItem(noteboard.CreateItemPayload{
-		Type:     "todo",
-		Title:    req.Title,
-		Body:     req.Body,
-		Tags:     req.Tags,
-		Priority: req.Priority,
-		ListID:   req.ListID,
-		DueAt:    req.DueAt,
+		Type:       "todo",
+		Title:      req.Title,
+		Body:       req.Body,
+		Tags:       req.Tags,
+		Priority:   req.Priority,
+		ListID:     req.ListID,
+		DueAt:      req.DueAt,
+		Hold:       req.Hold,
+		HoldReason: req.HoldReason,
 	})
 	if err != nil {
 		writeError(w, 502, "noteboard create failed: "+err.Error())
@@ -471,8 +473,41 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	case "links":
 		a.cardLinks(w, r, cardID)
 		return
+	case "hold":
+		a.holdCard(w, r, cardID, true)
+		return
+	case "unhold":
+		a.holdCard(w, r, cardID, false)
+		return
 	}
 	writeError(w, 404, "not found")
+}
+
+// holdCard is the stop/play button. The hold lives on the noteboard item, not on
+// this board — which is what lets a card be paused in ANY column instead of only
+// by being dragged into a designated gate column, and what makes the pause bind
+// on the noteboard-discovery path that never looks at a board at all.
+func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, hold bool) {
+	if r.Method != "POST" {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	var item noteboard.Item
+	var err error
+	if hold {
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		item, err = a.noteboard.HoldItem(cardID, req.Reason)
+	} else {
+		item, err = a.noteboard.UnholdItem(cardID)
+	}
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, item)
 }
 
 func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
