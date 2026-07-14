@@ -103,6 +103,10 @@ type CreateCardRequest struct {
 	DueAt    *string  `json:"due_at,omitempty"`
 	ColumnID string   `json:"column_id"`
 	Position *float64 `json:"position,omitempty"`
+	// ParentID makes this card a child of another item. The hold gate and the
+	// spend ceiling roll up over this edge, so a sub-card created without it
+	// escapes its parent's hold and its parent's spend ceiling.
+	ParentID *string `json:"parent_id,omitempty"`
 	// Hold creates the card parked — agents cannot pick the work up until a human
 	// presses play. Opt-in, for classes of work that should never run unattended.
 	Hold       bool   `json:"hold,omitempty"`

@@ -39,6 +39,11 @@ type CreateItemPayload struct {
 	Priority *int     `json:"priority,omitempty"`
 	ListID   *string  `json:"list_id,omitempty"`
 	DueAt    *string  `json:"due_at,omitempty"`
+	// ParentID is the canonical parent edge (noteboard item -> item). The hold
+	// gate and the spend ceiling both roll up over it: a held parent withholds its
+	// children, and a parent's ceiling covers the whole tree beneath it. A sub-card
+	// created without it is a sub-card that escapes both.
+	ParentID *string `json:"parent_id,omitempty"`
 	// Hold creates the card already parked, so no agent can pick the work up in
 	// the gap between the card appearing and a human getting to the board.
 	Hold       bool   `json:"hold,omitempty"`

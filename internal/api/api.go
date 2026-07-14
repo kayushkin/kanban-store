@@ -393,6 +393,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		Priority:      req.Priority,
 		ListID:        req.ListID,
 		DueAt:         req.DueAt,
+		ParentID:      req.ParentID,
 		Hold:          req.Hold,
 		HoldReason:    req.HoldReason,
 		AutoHoldAtUSD: req.AutoHoldAtUSD,
