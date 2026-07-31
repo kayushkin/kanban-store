@@ -714,6 +714,51 @@ func TestCardLinks(t *testing.T) {
 	}
 }
 
+// One entity can be linked to several cards — an agent session picks up a
+// dispatch card and then has its work classified onto more. A caller that has
+// to name a single card ("which todo is this session for?") reads the first
+// one, so the route must hand back the store's order untouched.
+//
+// The store-level guarantee (oldest link first, whatever order the rows were
+// written in) is pinned in internal/db; this checks the route does not
+// re-sort on the way out.
+func TestEntityCardsAreOldestLinkFirst(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	boardID := mkBoard(t, h, "Board")
+	colID := mkColumn(t, h, boardID, "Todo", "")
+
+	const sessionRef = "sess-ordered"
+	var wantOrder []string
+	for _, title := range []string{"dispatch", "classified once", "classified twice"} {
+		w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: title, ColumnID: colID})
+		var cv model.CardView
+		decode(t, w, &cv)
+		cardID := cv.Placement.CardID
+		wantOrder = append(wantOrder, cardID)
+		if w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+			EntityType: "session", EntityRef: sessionRef,
+		}); w.Code != 201 {
+			t.Fatalf("link %q: expected 201, got %d: %s", title, w.Code, w.Body.String())
+		}
+	}
+
+	w := do(t, h, "GET", "/api/entities/session/"+sessionRef+"/cards", nil)
+	if w.Code != 200 {
+		t.Fatalf("entity cards: expected 200, got %d", w.Code)
+	}
+	var got []map[string]any
+	decode(t, w, &got)
+	if len(got) != len(wantOrder) {
+		t.Fatalf("expected %d cards, got %d: %+v", len(wantOrder), len(got), got)
+	}
+	for i, want := range wantOrder {
+		if got[i]["card_id"] != want {
+			t.Errorf("card %d = %v, want %v (order must be oldest link first)", i, got[i]["card_id"], want)
+		}
+	}
+}
+
 // ============================ Search ============================
 
 func TestSearch(t *testing.T) {

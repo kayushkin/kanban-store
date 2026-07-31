@@ -546,9 +546,18 @@ func (s *Store) DeleteCardLink(linkID string) error {
 
 // ListCardsByEntity returns all card_ids linked to a given entity. Caller
 // joins these with placements / noteboard for full views.
+// ListCardsByEntity returns the cards linked to one entity, oldest link
+// first. The order is part of the answer, not a detail: a caller that has to
+// pick a single card out of several — "which todo is this session for?" —
+// gets the link that was made first, which is the one made before the entity
+// did anything. Without an ORDER BY, SQLite picks, and that caller silently
+// picks a different card as rows move around.
+//
+// Ties break on card_id so the order is total.
 func (s *Store) ListCardsByEntity(entityType, entityRef string) ([]string, error) {
 	rows, err := s.db.Query(
-		`SELECT DISTINCT card_id FROM card_links WHERE entity_type=? AND entity_ref=?`,
+		`SELECT card_id FROM card_links WHERE entity_type=? AND entity_ref=?
+		 GROUP BY card_id ORDER BY MIN(created_at), card_id`,
 		entityType, entityRef,
 	)
 	if err != nil {
