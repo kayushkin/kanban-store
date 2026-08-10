@@ -408,6 +408,15 @@ type CardView struct {
 	Item        any              `json:"item" tstype:"NoteboardItem | null"`
 	Links       []CardLink       `json:"links,omitempty"`
 	Assignments []CardAssignment `json:"assignments,omitempty"`
+	// AutoStatusApplied and AutoStatusError report the second write a card
+	// creation makes: when the destination column carries auto_status, the
+	// noteboard item is PATCHed to match. That write can fail on its own after
+	// the card already exists, and an unreported failure leaves the item reading
+	// "open" in a Done column — which is both the state auto_status exists to
+	// prevent and indistinguishable from a column that has no auto_status at
+	// all. Same field names moveCard answers with, because it is the same event.
+	AutoStatusApplied string `json:"auto_status_applied,omitempty"`
+	AutoStatusError   string `json:"auto_status_error,omitempty"`
 	// Time is the card's clock as the board sees it: how long it has been alive,
 	// how much of that counted as workable, and how that sits against the limit
 	// its priority sets. Computed from the card's events on every read, never
