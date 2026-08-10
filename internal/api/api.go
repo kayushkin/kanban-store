@@ -414,10 +414,23 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 	})
 	// If the destination column has auto_status, apply it now so card creation
 	// is symmetric with MoveCard (otherwise classifier-created cards in Done
-	// stay status=open in noteboard). Best-effort; failure is non-fatal.
+	// stay status=open in noteboard).
+	//
+	// Non-fatal, because the card and its placement both exist by this point —
+	// but NOT unreported. The failure leaves the item reading "open" in a Done
+	// column, which is the exact state this write exists to prevent, and "open"
+	// is also what a column with no auto_status returns, so a silent failure is
+	// indistinguishable from nothing having been asked for. noteboard is the
+	// source of truth agents read to decide what work is still open, so a
+	// dropped write here hands already-finished work back to the queue.
+	var autoStatusApplied, autoStatusError string
 	if col.AutoStatus != nil && *col.AutoStatus != "" {
-		if patched, perr := a.noteboard.PatchItem(cardID, map[string]any{"status": *col.AutoStatus}); perr == nil {
+		patched, perr := a.noteboard.PatchItem(cardID, map[string]any{"status": *col.AutoStatus})
+		if perr != nil {
+			autoStatusError = perr.Error()
+		} else {
 			item = patched
+			autoStatusApplied = *col.AutoStatus
 		}
 	}
 	if err != nil {
@@ -426,7 +439,12 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 201, model.CardView{Placement: p, Item: item})
+	writeJSON(w, 201, model.CardView{
+		Placement:         p,
+		Item:              item,
+		AutoStatusApplied: autoStatusApplied,
+		AutoStatusError:   autoStatusError,
+	})
 }
 
 // checkWIP returns an error if attaching another card would exceed the column's wip_limit.

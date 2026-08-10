@@ -29,6 +29,10 @@ type fakeNoteboard struct {
 	mu    sync.Mutex
 	items map[string]map[string]any
 	seq   int
+	// patchStatus, when non-zero, makes every PATCH answer that status instead
+	// of applying the change. noteboard being reachable for the create and
+	// unreachable a millisecond later is the ordinary case, not an exotic one.
+	patchStatus int
 }
 
 func newFakeNoteboard() *fakeNoteboard {
@@ -56,8 +60,15 @@ func (f *fakeNoteboard) handler() http.Handler {
 
 	mux.HandleFunc("GET /api/items/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		includeDeleted := r.URL.Query().Get("include_deleted") == "true"
 		f.mu.Lock()
 		it, ok := f.items[id]
+		if ok && !includeDeleted {
+			// A deleted item is not found unless asked for by name.
+			if _, deleted := it["deleted_at"]; deleted {
+				ok = false
+			}
+		}
 		var out map[string]any
 		if ok {
 			out = clone(it)
@@ -75,11 +86,22 @@ func (f *fakeNoteboard) handler() http.Handler {
 		var patch map[string]any
 		json.NewDecoder(r.Body).Decode(&patch)
 		f.mu.Lock()
+		if st := f.patchStatus; st != 0 {
+			f.mu.Unlock()
+			writeJSON(w, st, map[string]string{"error": "upstream refused the patch"})
+			return
+		}
 		it, ok := f.items[id]
 		var out map[string]any
 		if ok {
+			// noteboard decodes a PATCH into model.UpdateItemRequest NON-strictly:
+			// a key that struct does not carry is dropped in silence and still
+			// answered 200. Applying every key, as this fake used to, makes a
+			// misspelled field look like it worked.
 			for k, v := range patch {
-				it[k] = v
+				if noteboardUpdateFields[k] {
+					it[k] = v
+				}
 			}
 			out = clone(it)
 		}
@@ -91,6 +113,11 @@ func (f *fakeNoteboard) handler() http.Handler {
 		writeJSON(w, 200, out)
 	})
 
+	// A reversible delete stamps deleted_at and leaves status ALONE, exactly as
+	// noteboard does (internal/db/db.go DeleteItem, verified against a real
+	// noteboard binary on 2026-08-10). The row stops being visible: a later GET
+	// answers 404. This fake previously flipped status to "archived", which no
+	// version of noteboard has ever done, and a green test asserted it.
 	mux.HandleFunc("DELETE /api/items/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		hard := r.URL.Query().Get("hard") == "true"
@@ -100,12 +127,16 @@ func (f *fakeNoteboard) handler() http.Handler {
 			if hard {
 				delete(f.items, id)
 			} else {
-				it["status"] = "archived"
+				it["deleted_at"] = "2026-08-10T00:00:00Z"
 			}
 		}
 		f.mu.Unlock()
 		if !ok {
-			writeJSON(w, 404, map[string]string{"error": "not found"})
+			// noteboard answers a delete of an id it cannot find with 500 and the
+			// raw driver message, not 404 — every other missing-item route on that
+			// service answers 404. Reproduced rather than tidied, so this repo's
+			// tests exercise the behaviour that actually reaches them.
+			writeJSON(w, 500, map[string]string{"error": "sql: no rows in result set"})
 			return
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
@@ -113,19 +144,78 @@ func (f *fakeNoteboard) handler() http.Handler {
 
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		q := strings.ToLower(r.URL.Query().Get("q"))
+		if q == "" {
+			writeJSON(w, 400, map[string]string{"error": "q parameter is required"})
+			return
+		}
+		includeHeld := r.URL.Query().Get("include_held") == "true"
 		f.mu.Lock()
 		var out []map[string]any
 		for _, it := range f.items {
 			title, _ := it["title"].(string)
-			if q == "" || strings.Contains(strings.ToLower(title), q) {
-				out = append(out, clone(it))
+			if !strings.Contains(strings.ToLower(title), q) {
+				continue
 			}
+			if _, deleted := it["deleted_at"]; deleted {
+				continue
+			}
+			// Held items are withheld unless the caller asks for them — the board
+			// asks, an agent's discovery query must not.
+			if _, held := it["held_at"]; held && !includeHeld {
+				continue
+			}
+			out = append(out, clone(it))
 		}
 		f.mu.Unlock()
 		writeJSON(w, 200, out)
 	})
 
+	mux.HandleFunc("POST /api/items/{id}/hold", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		f.itemAction(w, r.PathValue("id"), func(it map[string]any) {
+			it["held_at"] = "2026-08-10T00:00:00Z"
+			it["hold_reason"] = req.Reason
+		})
+	})
+
+	mux.HandleFunc("POST /api/items/{id}/unhold", func(w http.ResponseWriter, r *http.Request) {
+		f.itemAction(w, r.PathValue("id"), func(it map[string]any) {
+			delete(it, "held_at")
+			delete(it, "hold_reason")
+		})
+	})
+
 	return mux
+}
+
+// noteboardUpdateFields is the json tag set of noteboard's UpdateItemRequest,
+// read from ~/repos/noteboard/model/model.go on 2026-08-10. A PATCH key outside
+// this set is discarded by the real service without saying so.
+var noteboardUpdateFields = map[string]bool{
+	"title": true, "body": true, "tags": true, "priority": true, "rank": true,
+	"status": true, "list_id": true, "due_at": true, "parent_id": true,
+	"links": true, "schedule": true, "auto_hold_at_usd": true,
+}
+
+// itemAction applies mutate to a live item and answers the way noteboard's
+// item sub-resources do: the updated item, or 404.
+func (f *fakeNoteboard) itemAction(w http.ResponseWriter, id string, mutate func(map[string]any)) {
+	f.mu.Lock()
+	it, ok := f.items[id]
+	var out map[string]any
+	if ok {
+		mutate(it)
+		out = clone(it)
+	}
+	f.mu.Unlock()
+	if !ok {
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 // status returns the stored status for an item, or "" if it does not exist.
@@ -506,12 +596,34 @@ func TestCardCreateAndDelete(t *testing.T) {
 		t.Fatalf("expected 1 card in 1 column, got %+v", view.Columns)
 	}
 
-	// Soft delete (archive) the card → noteboard item flips to archived.
+	// A reversible delete of the card. This assertion used to read "→ noteboard
+	// item flips to archived", and it passed, because the fake it ran against
+	// had been written from this repo's comments instead of from noteboard's
+	// routes. noteboard stamps deleted_at and never touches status.
 	if w := do(t, h, "DELETE", "/api/cards/"+cardID, nil); w.Code != 200 {
 		t.Fatalf("delete card: expected 200, got %d", w.Code)
 	}
-	if nb.status(cardID) != "archived" {
-		t.Fatalf("expected archived after soft delete, got %q", nb.status(cardID))
+	if got := nb.status(cardID); got != "open" {
+		t.Fatalf("a reversible delete must leave status alone, got %q — deleting is the "+
+			"item being taken away, archiving is a state the user chose for a live "+
+			"item, and a restore has to be able to tell them apart", got)
+	}
+
+	// And this is what a soft delete actually does to the board: the placement
+	// survives, the item read 404s, so the card leaves its column and lands in
+	// the orphan bucket. Nothing hides it as an archived card, because nothing
+	// ever marks it archived.
+	w = do(t, h, "GET", "/api/boards/"+boardID+"/cards", nil)
+	if w.Code != 200 {
+		t.Fatalf("board view: expected 200, got %d", w.Code)
+	}
+	view = model.BoardView{}
+	decode(t, w, &view)
+	if len(view.Columns) != 1 || len(view.Columns[0].Cards) != 0 {
+		t.Fatalf("deleted card must leave its column, got %+v", view.Columns)
+	}
+	if len(view.Orphans) != 1 || view.Orphans[0].Placement.CardID != cardID {
+		t.Fatalf("deleted card must surface as an orphan placement, got %+v", view.Orphans)
 	}
 }
 
@@ -789,5 +901,96 @@ func TestSearch(t *testing.T) {
 	// Missing q → 400.
 	if w := do(t, h, "GET", "/api/search", nil); w.Code != 400 {
 		t.Fatalf("missing q: expected 400, got %d", w.Code)
+	}
+}
+
+// A card created straight into a column with auto_status carries TWO writes: the
+// noteboard create, then a PATCH that makes the item's status match the column.
+// The second one can fail on its own, and when it does the card exists in
+// noteboard reading "open" while sitting in a Done column — which is precisely
+// the state the auto_status write exists to prevent.
+//
+// moveCard already reports that failure as auto_status_error. createCard used to
+// drop it: the `if perr == nil` guard had no else, so the response was a plain
+// 201 carrying the pre-patch item. status "open" is also exactly what a column
+// with no auto_status returns, so the failure produced a value indistinguishable
+// from a legitimate answer, and noteboard is the source of truth that agents
+// read to decide what work is still open.
+func TestCardCreateReportsAFailedAutoStatus(t *testing.T) {
+	h, nb, cleanup := setup(t)
+	defer cleanup()
+
+	boardID := mkBoard(t, h, "Board")
+	colID := mkColumn(t, h, boardID, "Done", "done")
+
+	nb.patchStatus = 503
+
+	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+		Title: "lands in Done", ColumnID: colID,
+	})
+	if w.Code != 201 {
+		t.Fatalf("create card: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var cv model.CardView
+	decode(t, w, &cv)
+
+	if cv.AutoStatusError == "" {
+		t.Fatalf("a failed auto_status write must be reported: the card is in a column "+
+			"whose auto_status is %q and its noteboard item still reads %q, and the "+
+			"response says nothing — got %s", "done", nb.status(cv.Placement.CardID),
+			w.Body.String())
+	}
+	if cv.AutoStatusApplied != "" {
+		t.Errorf("auto_status was not applied, so it must not be reported as applied: %q",
+			cv.AutoStatusApplied)
+	}
+}
+
+// The other side of the same contract: when the write succeeds, say so, and say
+// it with the same field moveCard uses.
+func TestCardCreateReportsAnAppliedAutoStatus(t *testing.T) {
+	h, nb, cleanup := setup(t)
+	defer cleanup()
+
+	boardID := mkBoard(t, h, "Board")
+	colID := mkColumn(t, h, boardID, "Done", "done")
+
+	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+		Title: "lands in Done", ColumnID: colID,
+	})
+	if w.Code != 201 {
+		t.Fatalf("create card: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var cv model.CardView
+	decode(t, w, &cv)
+
+	if cv.AutoStatusApplied != "done" {
+		t.Errorf("auto_status_applied: got %q, want done", cv.AutoStatusApplied)
+	}
+	if cv.AutoStatusError != "" {
+		t.Errorf("auto_status succeeded, so no error must be reported: %q", cv.AutoStatusError)
+	}
+	if got := nb.status(cv.Placement.CardID); got != "done" {
+		t.Errorf("noteboard status: got %q, want done", got)
+	}
+}
+
+// A column with no auto_status must stay silent on both fields — otherwise the
+// "applied" field cannot be read as evidence that anything happened.
+func TestCardCreateWithoutAutoStatusReportsNeither(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+
+	boardID := mkBoard(t, h, "Board")
+	colID := mkColumn(t, h, boardID, "Todo", "")
+
+	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+		Title: "plain", ColumnID: colID,
+	})
+	var cv model.CardView
+	decode(t, w, &cv)
+	if cv.AutoStatusApplied != "" || cv.AutoStatusError != "" {
+		t.Errorf("no auto_status column must report neither field, got applied=%q error=%q",
+			cv.AutoStatusApplied, cv.AutoStatusError)
 	}
 }

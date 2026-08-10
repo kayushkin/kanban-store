@@ -60,12 +60,12 @@ func (c *Client) CreateItem(p CreateItemPayload) (Item, error) {
 	}
 	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	return c.doJSON(req, http.StatusCreated)
+	return c.doJSON(req, http.StatusCreated, "")
 }
 
 func (c *Client) GetItem(id string) (Item, error) {
 	req, _ := http.NewRequest("GET", c.BaseURL+"/api/items/"+url.PathEscape(id), nil)
-	return c.doJSON(req, http.StatusOK)
+	return c.doJSON(req, http.StatusOK, id)
 }
 
 func (c *Client) PatchItem(id string, patch map[string]any) (Item, error) {
@@ -75,7 +75,7 @@ func (c *Client) PatchItem(id string, patch map[string]any) (Item, error) {
 	}
 	req, _ := http.NewRequest("PATCH", c.BaseURL+"/api/items/"+url.PathEscape(id), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	return c.doJSON(req, http.StatusOK)
+	return c.doJSON(req, http.StatusOK, id)
 }
 
 // HoldItem parks the card's work: agents stop seeing it, the card stays on the
@@ -87,16 +87,27 @@ func (c *Client) HoldItem(id, reason string) (Item, error) {
 	}
 	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items/"+url.PathEscape(id)+"/hold", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	return c.doJSON(req, http.StatusOK)
+	return c.doJSON(req, http.StatusOK, id)
 }
 
 // UnholdItem clears the gate — agents may pick the work up again.
 func (c *Client) UnholdItem(id string) (Item, error) {
 	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items/"+url.PathEscape(id)+"/unhold", nil)
-	return c.doJSON(req, http.StatusOK)
+	return c.doJSON(req, http.StatusOK, id)
 }
 
-// DeleteItem soft-archives by default; pass hard=true for permanent delete.
+// DeleteItem removes the item reversibly by default; pass hard=true to purge.
+//
+// ⚠️ A reversible delete is NOT an archive, and reading it as one is the
+// expensive mistake on this route. noteboard stamps deleted_at and leaves
+// `status` exactly as it was — an open card stays "open" — while dropping the
+// row out of every read path, so a later GET answers 404. Deleting is the item
+// being taken away; archiving is a state the user chose for a live item, and
+// collapsing the two means a restore cannot tell them apart.
+//
+// The consequence for this repo: a soft-deleted card's placement survives and
+// its item read 404s, so the board reports it as an orphan. Nothing anywhere
+// sets status to "archived".
 func (c *Client) DeleteItem(id string, hard bool) error {
 	u := c.BaseURL + "/api/items/" + url.PathEscape(id)
 	if hard {
@@ -188,16 +199,20 @@ func isNotFound(err error) bool {
 	return ok
 }
 
-func (c *Client) doJSON(req *http.Request, want int) (Item, error) {
+// doJSON is the shared transport under every call that reads an item back. The
+// itemID names which item the request is about, and "" means the request is
+// about no particular item yet (a create). That distinction decides what a 404
+// means: for a named item it is "this item is not visible", which callers turn
+// into an orphan; with no item named it is "noteboard does not serve this
+// route", which is a real failure and must not be reported as a missing card.
+func (c *Client) doJSON(req *http.Request, want int, itemID string) (Item, error) {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		// best-effort id from URL path tail
-		id := req.URL.Path
-		return nil, &notFoundError{id: id}
+	if resp.StatusCode == http.StatusNotFound && itemID != "" {
+		return nil, &notFoundError{id: itemID}
 	}
 	if resp.StatusCode != want {
 		body, _ := io.ReadAll(resp.Body)
