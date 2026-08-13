@@ -535,9 +535,11 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 			writeError(w, 502, err.Error())
 			return
 		}
-		// On hard delete, remove all placements; on soft, leave them so the
-		// card disappears from boards by being status=archived (frontend can
-		// hide archived cards).
+		// On hard delete the item is gone for good, so drop its placements too.
+		// On a reversible delete the placements stay, because the delete itself
+		// is undoable and restoring the item has to restore it onto its boards.
+		// Until then the card still occupies its column with a null item — the
+		// same shape as an orphan — so a frontend must render that case.
 		if hard {
 			_ = a.store.DetachCardEverywhere(cardID)
 		}

@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/kayushkincom/bin/kanban-store
+ExecStart=%h/bin/kanban-store
 Environment=KANBAN_PORT=8305
-Environment=KANBAN_DB=/home/kayushkincom/.kanban-store/kanban-store.db
+Environment=KANBAN_DB=%h/.kanban-store/kanban-store.db
 Environment=KANBAN_NOTEBOARD_URL=http://localhost:8191
-Environment=HOME=/home/kayushkincom
-WorkingDirectory=/home/kayushkincom/repos/kanban-store
+Environment=HOME=%h
+WorkingDirectory=%h/repos/kanban-store
 Restart=on-failure
 RestartSec=5
 

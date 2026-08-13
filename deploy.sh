@@ -56,7 +56,7 @@ step "preflight"
 [ -f "$DB_PATH" ]  || echo "    note: $DB_PATH does not exist yet — it will be created empty"
 echo "    WorkingDirectory exists: $WORK_DIR"
 
-step "build (default flags, pure-Go modernc SQLite — see ./Makefile)"
+step "build (cgo go-sqlite3 — a C compiler is required; see ./Makefile)"
 cd "$REPO_DIR"
 go vet ./...
 make test

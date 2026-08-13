@@ -96,7 +96,10 @@ func (c *Client) UnholdItem(id string) (Item, error) {
 	return c.doJSON(req, http.StatusOK)
 }
 
-// DeleteItem soft-archives by default; pass hard=true for permanent delete.
+// DeleteItem asks noteboard for a reversible delete by default: the item is
+// stamped deleted_at and drops out of every read path, but the row survives and
+// can be restored. It is NOT archiving — the item's status is left untouched.
+// Pass hard=true to purge the row permanently.
 func (c *Client) DeleteItem(id string, hard bool) error {
 	u := c.BaseURL + "/api/items/" + url.PathEscape(id)
 	if hard {
