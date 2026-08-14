@@ -464,34 +464,80 @@ func TestDeleteItemHardUsesTheExactSpellingNoteboardTests(t *testing.T) {
 	}
 }
 
-// ⚠️ A disagreement, recorded rather than smoothed over.
+// ⚠️ This was a recorded disagreement. It is now a recorded consequence.
 //
-// noteboard answers a DELETE of an id it cannot find with **500** and the raw
-// driver message ("sql: no rows in result set"), not 404 — measured against the
-// live binary. Every other missing-item route on that service answers 404. It
-// matters here because a second delete of the same card takes this path: the
-// first stamps deleted_at, the second finds nothing and 500s.
+// The 114th pass measured noteboard answering a DELETE of an id it cannot find
+// with **500** and the raw driver message, and pinned that here. The 130th pass
+// fixed noteboard: it answers **404** now, like every other missing-item route
+// on that service (noteboard branch fix/delete-of-a-missing-item-is-404,
+// commit 23830ac, card 5962e9ef).
 //
-// This client does not route DeleteItem through doJSON, so it has no 404 case
-// at all and reports every non-200 the same way. That is currently harmless
-// only because noteboard never sends 404 here. Pinned in both directions so a
-// change on either side is visible.
+// Two things the old note here got wrong, and they are worth keeping written
+// down because they are what a reader would otherwise re-derive:
+//
+//  1. It said "a second delete of the same card takes this path: the first
+//     stamps deleted_at, the second finds nothing and 500s." It does not.
+//     noteboard's DeleteItem reads through GetItemIncludingDeleted, which still
+//     finds the tombstone, so a second soft delete is a no-op answering 200.
+//     The paths that really reach the missing-row branch are an id that never
+//     existed and an id whose row was hard-purged.
+//  2. It said this test was pinned "in both directions so a change on either
+//     side is visible". It was not, and could not be: the recorder below is a
+//     fabricated server, so the status it returns is whatever this file says it
+//     is. No change to noteboard can redden it. Only a change to THIS client
+//     can. That is a fine thing for a client test to be — it just is not a
+//     tripwire on the other repo, and calling it one meant nobody looked.
+//
+// So this test now asserts what the client does with the status noteboard
+// actually sends, and the assertion that matters is unchanged: DeleteItem still
+// flattens it. See TestDeleteItemStillCannotTellAMissingItemFromAFailure.
 func TestDeleteItemReportsAMissingItemAsAPlainError(t *testing.T) {
-	rec := &recorder{status: 500, reply: `{"error":"sql: no rows in result set"}`}
+	rec := &recorder{status: 404, reply: `{"error":"not found"}`}
 	c, closeFn := rec.server(t)
 	defer closeFn()
 
 	err := c.DeleteItem("gone", false)
 	if err == nil {
-		t.Fatal("a 500 must be an error")
-	}
-	if isNotFound(err) {
-		t.Error("DeleteItem does not classify notFound — if this starts passing, " +
-			"noteboard's delete route changed to 404 and callers can now tell " +
-			"'already gone' from 'delete failed'")
+		t.Fatal("a 404 must still be an error")
 	}
 	if !strings.Contains(err.Error(), "gone") {
 		t.Errorf("the error must name the id, got: %v", err)
+	}
+}
+
+// TestDeleteItemStillCannotTellAMissingItemFromAFailure is the live consequence
+// of the change above, and it is deliberately an assertion about a gap rather
+// than about a repair.
+//
+// Every other call on this client goes through doJSON, which turns a 404 on a
+// named item into a typed notFoundError so a caller can tell "already gone"
+// from "the store is broken". DeleteItem does not use doJSON, so isNotFound is
+// false for both. While noteboard answered 500 that cost nothing, because no
+// 404 ever arrived here. Now one does, and internal/api/api.go reports it to
+// the browser as a **502** — deleting an already-purged card is presented as
+// noteboard being unreachable.
+//
+// Whether kanban-store should answer 404 there instead is a contract question
+// about THIS service's API, not a defect in the client, so it is filed rather
+// than decided here. This test pins the gap so the filing cannot go stale
+// silently: it fails the moment DeleteItem starts classifying, which is the
+// moment the filed question has been answered.
+func TestDeleteItemStillCannotTellAMissingItemFromAFailure(t *testing.T) {
+	for _, status := range []int{404, 500} {
+		rec := &recorder{status: status, reply: `{"error":"whatever"}`}
+		c, closeFn := rec.server(t)
+		err := c.DeleteItem("gone", false)
+		closeFn()
+
+		if err == nil {
+			t.Fatalf("status %d: must be an error", status)
+		}
+		if isNotFound(err) {
+			t.Errorf("status %d: DeleteItem now classifies notFound. If this is "+
+				"intended, the handler in internal/api/api.go must stop "+
+				"reporting a missing item as 502, and this test should be "+
+				"replaced by one asserting the new contract.", status)
+		}
 	}
 }
 
