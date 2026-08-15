@@ -141,9 +141,9 @@ func (f *fakeNoteboard) handler() http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
 
-	// The stop/play button. kanban-store forwards a hold straight through to
-	// noteboard, so the fake has to hold state for it or every clock event that
-	// follows a hold goes untested.
+	// The hold gate. noteboard parks an item by stamping held_at and clears it
+	// on unhold; kanban-store keeps no hold of its own, it forwards. So these
+	// two endpoints are where the gate's two directions can be observed at all.
 	mux.HandleFunc("POST /api/items/{id}/hold", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Reason string `json:"reason"`
@@ -171,6 +171,30 @@ func (f *fakeNoteboard) handler() http.Handler {
 	})
 
 	return mux
+}
+
+// heldAt returns the stored held_at for an item, or "" if it is not held. The
+// hold lives on the noteboard item rather than on the board, so this is where
+// holding has to be observed — the board carries nothing to assert against.
+func (f *fakeNoteboard) heldAt(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if it, ok := f.items[id]; ok {
+		s, _ := it["held_at"].(string)
+		return s
+	}
+	return ""
+}
+
+// holdReason returns the reason recorded with the hold, or "" if there is none.
+func (f *fakeNoteboard) holdReason(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if it, ok := f.items[id]; ok {
+		s, _ := it["hold_reason"].(string)
+		return s
+	}
+	return ""
 }
 
 // status returns the stored status for an item, or "" if it does not exist.
