@@ -111,6 +111,49 @@ func (f *fakeNoteboard) handler() http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
 
+	// The hold gate. noteboard parks an item by stamping held_at and clears it
+	// on unhold; kanban-store keeps no hold of its own, it forwards. So these
+	// two endpoints are where the gate's two directions can be observed at all.
+	mux.HandleFunc("POST /api/items/{id}/hold", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		id := r.PathValue("id")
+		f.mu.Lock()
+		it, ok := f.items[id]
+		var out map[string]any
+		if ok {
+			it["held_at"] = "2026-01-01T00:00:00Z"
+			it["hold_reason"] = req.Reason
+			out = clone(it)
+		}
+		f.mu.Unlock()
+		if !ok {
+			writeJSON(w, 404, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, 200, out)
+	})
+
+	mux.HandleFunc("POST /api/items/{id}/unhold", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		f.mu.Lock()
+		it, ok := f.items[id]
+		var out map[string]any
+		if ok {
+			delete(it, "held_at")
+			delete(it, "hold_reason")
+			out = clone(it)
+		}
+		f.mu.Unlock()
+		if !ok {
+			writeJSON(w, 404, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, 200, out)
+	})
+
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		q := strings.ToLower(r.URL.Query().Get("q"))
 		f.mu.Lock()
@@ -126,6 +169,30 @@ func (f *fakeNoteboard) handler() http.Handler {
 	})
 
 	return mux
+}
+
+// heldAt returns the stored held_at for an item, or "" if it is not held. The
+// hold lives on the noteboard item rather than on the board, so this is where
+// holding has to be observed — the board carries nothing to assert against.
+func (f *fakeNoteboard) heldAt(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if it, ok := f.items[id]; ok {
+		s, _ := it["held_at"].(string)
+		return s
+	}
+	return ""
+}
+
+// holdReason returns the reason recorded with the hold, or "" if there is none.
+func (f *fakeNoteboard) holdReason(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if it, ok := f.items[id]; ok {
+		s, _ := it["hold_reason"].(string)
+		return s
+	}
+	return ""
 }
 
 // status returns the stored status for an item, or "" if it does not exist.
