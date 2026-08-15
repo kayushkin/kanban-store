@@ -65,6 +65,24 @@ make build
 [ -x "$STAGED" ] || fail "make build produced no binary at $STAGED"
 echo "    built: $(ls -lh "$STAGED" | awk '{print $5}')"
 
+step "provenance — refuse a binary that cannot be traced to a commit"
+# `go build` writes no VCS stamp when it cannot find a .git DIRECTORY, and it does
+# not fail when that happens -- not even with -buildvcs=true, and not even with no
+# repository at all (measured on go1.26.0). A worktree's .git is a pointer file, so
+# a deploy run from one stages an untraceable binary while every check above still
+# passes. Absence of a stamp is the one defect that looks exactly like success, so
+# assert it rather than trusting the build.
+buildinfo="$(go version -m "$STAGED")"
+vcs_revision="$(printf '%s\n' "$buildinfo" | awk -F= '$1 ~ /[[:space:]]vcs\.revision$/ {print $2}')"
+vcs_modified="$(printf '%s\n' "$buildinfo" | awk -F= '$1 ~ /[[:space:]]vcs\.modified$/ {print $2}')"
+[ -n "$vcs_revision" ] || fail "$STAGED carries no vcs.revision, so nothing ties it back to a commit. The usual cause is building from a git worktree, whose .git is a pointer file -- build from a real clone or checkout instead."
+echo "    vcs.revision=$vcs_revision"
+if [ "$vcs_modified" = "true" ]; then
+  echo "    WARNING: built from a DIRTY tree (vcs.modified=true). $vcs_revision names the commit" >&2
+  echo "    this binary was built NEAR, not the source it was built FROM, and that source is not" >&2
+  echo "    recoverable from any commit. Commit first for a reproducible build." >&2
+fi
+
 step "boot-and-answer smoke on a throwaway DB, before touching the live one"
 # The binary has to prove it can open a database and serve real board/column/card
 # state BEFORE it gets installed. `go build` passing says nothing about either
