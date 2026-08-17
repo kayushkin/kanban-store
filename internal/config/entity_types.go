@@ -38,10 +38,13 @@ var EntityTypes = []model.EntityTypeInfo{
 	//               mail belongs on a card, which is how email-classifier learns
 	//               to file bulk mail without calling a model.
 	//
-	// Search is empty on all three deliberately: mailstack has no search route
-	// (GET /api/search is a 404) and cannot look a message up by any of these
-	// refs, so publishing a search URL here would advertise a lookup that does
-	// not exist.
+	// Search is empty on all three deliberately: mailstack publishes no ?q=
+	// search route (GET /api/search is a 404), so there is no autocomplete to
+	// advertise. It does resolve some of these refs by exact id — email via
+	// GET /api/messages/{id}?account=, email_msgid via
+	// GET /api/lookup/message-id/{messageID} — but an exact-id resolver is not a
+	// search endpoint and does not belong in this field. Adding more resolvers
+	// upstream does not change that; only a ?q= route would.
 	{Type: "email", Service: "mailstack"},
 	{Type: "email_msgid", Service: "mailstack"},
 	{Type: "email_sender", Service: "mailstack"},
