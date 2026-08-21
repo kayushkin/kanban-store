@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +32,10 @@ func New(dbPath string) (*Store, error) {
 		return nil, err
 	}
 	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateActivity(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -127,7 +132,7 @@ func (s *Store) CreateBoard(req *model.CreateBoardRequest) (*model.Board, error)
 }
 
 func (s *Store) ListBoards(includeArchived bool) ([]*model.Board, error) {
-	q := `SELECT id, name, description, archived, created_at, updated_at FROM boards`
+	q := `SELECT id, name, description, archived, business_hours, created_at, updated_at FROM boards`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
 	}
@@ -139,30 +144,44 @@ func (s *Store) ListBoards(includeArchived bool) ([]*model.Board, error) {
 	defer rows.Close()
 	var out []*model.Board
 	for rows.Next() {
-		b := &model.Board{}
-		var arch int
-		if err := rows.Scan(&b.ID, &b.Name, &b.Description, &arch, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		b, err := scanBoard(rows)
+		if err != nil {
 			return nil, err
 		}
-		b.Archived = arch != 0
 		out = append(out, b)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) GetBoard(id string) (*model.Board, error) {
-	b := &model.Board{}
-	var arch int
-	err := s.db.QueryRow(
-		`SELECT id, name, description, archived, created_at, updated_at FROM boards WHERE id = ?`, id,
-	).Scan(&b.ID, &b.Name, &b.Description, &arch, &b.CreatedAt, &b.UpdatedAt)
+	row := s.db.QueryRow(
+		`SELECT id, name, description, archived, business_hours, created_at, updated_at FROM boards WHERE id = ?`, id,
+	)
+	b, err := scanBoard(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err != nil {
+	return b, err
+}
+
+// scanBoard reads a board row, decoding the business-hours JSON blob. A board
+// that has never been given hours keeps a nil BusinessHours, which is what makes
+// the business-hours figures absent rather than zero further down.
+func scanBoard(r scanner) (*model.Board, error) {
+	b := &model.Board{}
+	var arch int
+	var hours sql.NullString
+	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	b.Archived = arch != 0
+	if hours.Valid && strings.TrimSpace(hours.String) != "" {
+		var bh model.BusinessHours
+		if err := json.Unmarshal([]byte(hours.String), &bh); err != nil {
+			return nil, fmt.Errorf("board %s has unreadable business_hours: %w", b.ID, err)
+		}
+		b.BusinessHours = &bh
+	}
 	return b, nil
 }
 
@@ -180,14 +199,31 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 	if req.Archived != nil {
 		b.Archived = *req.Archived
 	}
+	if req.BusinessHours != nil {
+		// A present-but-empty object clears the hours; anything else replaces them.
+		// The API validates the value before it reaches here.
+		if req.BusinessHours.TZID == "" {
+			b.BusinessHours = nil
+		} else {
+			b.BusinessHours = req.BusinessHours
+		}
+	}
 	b.UpdatedAt = now()
 	arch := 0
 	if b.Archived {
 		arch = 1
 	}
+	var hours any
+	if b.BusinessHours != nil {
+		encoded, err := json.Marshal(b.BusinessHours)
+		if err != nil {
+			return nil, err
+		}
+		hours = string(encoded)
+	}
 	_, err = s.db.Exec(
-		`UPDATE boards SET name=?, description=?, archived=?, updated_at=? WHERE id=?`,
-		b.Name, b.Description, arch, b.UpdatedAt, id,
+		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?, updated_at=? WHERE id=?`,
+		b.Name, b.Description, arch, hours, b.UpdatedAt, id,
 	)
 	return b, err
 }
@@ -222,22 +258,23 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 		}
 	}
 	c := &model.Column{
-		ID:         uuid.NewString(),
-		BoardID:    boardID,
-		Name:       req.Name,
-		Position:   pos,
-		WIPLimit:   req.WIPLimit,
-		AutoStatus: req.AutoStatus,
-		CreatedAt:  now(),
-		UpdatedAt:  now(),
+		ID:               uuid.NewString(),
+		BoardID:          boardID,
+		Name:             req.Name,
+		Position:         pos,
+		WIPLimit:         req.WIPLimit,
+		AutoStatus:       req.AutoStatus,
+		BudgetClockState: req.BudgetClockState,
+		CreatedAt:        now(),
+		UpdatedAt:        now(),
 	}
 	if req.Color != nil {
 		c.Color = *req.Color
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, c.CreatedAt, c.UpdatedAt,
+		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState), c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -247,7 +284,7 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 
 func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 	rows, err := s.db.Query(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at
 		 FROM columns WHERE board_id = ? ORDER BY position ASC`, boardID,
 	)
 	if err != nil {
@@ -267,7 +304,7 @@ func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 
 func (s *Store) GetColumn(id string) (*model.Column, error) {
 	row := s.db.QueryRow(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at
 		 FROM columns WHERE id = ?`, id,
 	)
 	c, err := scanColumn(row)
@@ -284,9 +321,13 @@ type scanner interface {
 func scanColumn(r scanner) (*model.Column, error) {
 	c := &model.Column{}
 	var wip sql.NullInt64
-	var auto sql.NullString
-	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	var auto, clock sql.NullString
+	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &clock, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if clock.Valid && clock.String != "" {
+		v := model.ClockState(clock.String)
+		c.BudgetClockState = &v
 	}
 	if wip.Valid {
 		v := int(wip.Int64)
@@ -319,10 +360,19 @@ func (s *Store) UpdateColumn(id string, req *model.UpdateColumnRequest) (*model.
 	if req.AutoStatus != nil {
 		c.AutoStatus = req.AutoStatus
 	}
+	if req.BudgetClockState != nil {
+		// An empty string clears the setting, which puts the column back to leaving
+		// the clock exactly where it found it.
+		if *req.BudgetClockState == "" {
+			c.BudgetClockState = nil
+		} else {
+			c.BudgetClockState = req.BudgetClockState
+		}
+	}
 	c.UpdatedAt = now()
 	_, err = s.db.Exec(
-		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, updated_at=? WHERE id=?`,
-		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, c.UpdatedAt, id,
+		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, budget_clock_state=?, updated_at=? WHERE id=?`,
+		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState), c.UpdatedAt, id,
 	)
 	return c, err
 }

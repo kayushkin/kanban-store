@@ -3,14 +3,17 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
+	"github.com/kayushkin/kanban-store/internal/timeaccounting"
 )
 
 type API struct {
@@ -38,6 +41,9 @@ func (a *API) Handler() http.Handler {
 
 	// links (delete by link id)
 	mux.HandleFunc("/api/links/", a.linkByID)
+
+	// card notes (delete by note id)
+	mux.HandleFunc("/api/notes/", a.notesByID)
 
 	// reverse lookups by entity
 	mux.HandleFunc("/api/entities/", a.entityScoped)
@@ -164,6 +170,11 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 			a.boardCardByID(w, r, boardID, parts[2])
 			return
 		}
+	case "priority-levels":
+		if len(parts) == 2 {
+			a.boardPriorityLevels(w, r, boardID)
+			return
+		}
 	}
 	writeError(w, 404, "not found")
 }
@@ -181,6 +192,10 @@ func (a *API) boardByID(w http.ResponseWriter, r *http.Request, id string) {
 		var req model.UpdateBoardRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, 400, "invalid JSON")
+			return
+		}
+		if err := req.Validate(); err != nil {
+			writeError(w, 400, err.Error())
 			return
 		}
 		b, err := a.store.UpdateBoard(id, &req)
@@ -282,6 +297,10 @@ func (a *API) columnByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid JSON")
 			return
 		}
+		if err := req.Validate(); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
 		if req.AutoStatus != nil && *req.AutoStatus != "" && *req.AutoStatus != "open" && *req.AutoStatus != "done" && *req.AutoStatus != "archived" {
 			writeError(w, 400, "auto_status must be one of: open, done, archived")
 			return
@@ -348,10 +367,27 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			mapDBErr(w, err)
 			return
 		}
+		if err := a.recordEvent(&model.CardEvent{
+			CardID: cardID, BoardID: boardID, Kind: model.EventCardAttached,
+			ClockState: a.clockStateForColumn(cardID, boardID, req.ColumnID),
+			Actor:      actorFrom(r), ToColumnID: req.ColumnID,
+		}); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
 		writeJSON(w, 201, p)
 	case "DELETE":
 		if err := a.store.DetachCard(boardID, cardID); err != nil {
 			mapDBErr(w, err)
+			return
+		}
+		// The card left this board, so its clock on this board stops. The log stays:
+		// a card that was here and went is part of what happened.
+		if err := a.recordEvent(&model.CardEvent{
+			CardID: cardID, BoardID: boardID, Kind: model.EventCardDetached,
+			ClockState: model.ClockStopped, Actor: actorFrom(r),
+		}); err != nil {
+			writeError(w, 500, err.Error())
 			return
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
@@ -426,6 +462,17 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
+	// The card's clock starts here. A card created straight into a column that
+	// stops the clock (a classifier filing already-handled mail under "No action")
+	// is born finished, and says so.
+	if err := a.recordEvent(&model.CardEvent{
+		CardID: cardID, BoardID: boardID, Kind: model.EventCardCreated,
+		ClockState: a.clockStateForColumn(cardID, boardID, req.ColumnID),
+		Actor:      actorFrom(r), Summary: req.Title, ToColumnID: req.ColumnID,
+	}); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	writeJSON(w, 201, model.CardView{Placement: p, Item: item})
 }
 
@@ -454,6 +501,9 @@ func (a *API) checkWIP(columnID string) error {
 //	/api/cards/:cardID/move           — POST  (move within/across columns)
 //	/api/cards/:cardID/placements     — GET   (all boards this card is on)
 //	/api/cards/:cardID/links          — GET, POST
+//	/api/cards/:cardID/events         — GET, POST  (the action log)
+//	/api/cards/:cardID/notes          — GET, POST  (status updates and summaries)
+//	/api/cards/:cardID/timeline       — GET   (events + notes + the time they took)
 func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/cards/")
 	if rest == "" {
@@ -483,6 +533,15 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	case "unhold":
 		a.holdCard(w, r, cardID, false)
 		return
+	case "events":
+		a.cardEvents(w, r, cardID)
+		return
+	case "notes":
+		a.cardNotes(w, r, cardID)
+		return
+	case "timeline":
+		a.cardTimeline(w, r, cardID)
+		return
 	}
 	writeError(w, 404, "not found")
 }
@@ -498,17 +557,31 @@ func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, ho
 	}
 	var item noteboard.Item
 	var err error
+	holdReason := ""
 	if hold {
 		var req struct {
 			Reason string `json:"reason"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
+		holdReason = req.Reason
 		item, err = a.noteboard.HoldItem(cardID, req.Reason)
 	} else {
 		item, err = a.noteboard.UnholdItem(cardID)
 	}
 	if err != nil {
 		writeError(w, 502, err.Error())
+		return
+	}
+	// Pressing stop parks the work wherever it sits, so the clock pauses on every
+	// board at once — which is why this event carries no board.
+	kind, state := model.EventCardUnheld, model.ClockRunning
+	if hold {
+		kind, state = model.EventCardHeld, model.ClockPaused
+	}
+	if err := a.recordEvent(&model.CardEvent{
+		CardID: cardID, Kind: kind, ClockState: state, Actor: actorFrom(r), Summary: holdReason,
+	}); err != nil {
+		writeError(w, 500, err.Error())
 		return
 	}
 	writeJSON(w, 200, item)
@@ -527,6 +600,17 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 		if err != nil {
 			writeError(w, 502, err.Error())
 			return
+		}
+		// Completing a card stops its clock, however the completion was expressed —
+		// dragged into a Done column, or patched straight to done from anywhere.
+		if status, ok := patch["status"].(string); ok && (status == "done" || status == "archived") {
+			if err := a.recordEvent(&model.CardEvent{
+				CardID: cardID, Kind: model.EventCardCompleted, ClockState: model.ClockStopped,
+				Actor: actorFrom(r), Summary: status,
+			}); err != nil {
+				writeError(w, 500, err.Error())
+				return
+			}
 		}
 		writeJSON(w, 200, item)
 	case "DELETE":
@@ -584,6 +668,19 @@ func (a *API) moveCard(w http.ResponseWriter, r *http.Request, cardID string) {
 	// noteboard item to match. Failure here is non-fatal (the move succeeded
 	// in kanban-store) but logged in the response.
 	col, _ := a.store.GetColumn(req.ColumnID)
+	fromColumn := ""
+	if current != nil {
+		fromColumn = current.ColumnID
+	}
+	if err := a.recordEvent(&model.CardEvent{
+		CardID: cardID, BoardID: req.BoardID, Kind: model.EventCardMoved,
+		ClockState:   a.clockStateForColumn(cardID, req.BoardID, req.ColumnID),
+		Actor:        actorFrom(r),
+		FromColumnID: fromColumn, ToColumnID: req.ColumnID,
+	}); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	resp := map[string]any{"placement": p}
 	if col != nil && col.AutoStatus != nil && *col.AutoStatus != "" {
 		if _, err := a.noteboard.PatchItem(cardID, map[string]any{"status": *col.AutoStatus}); err != nil {
@@ -633,6 +730,19 @@ func (a *API) cardLinks(w http.ResponseWriter, r *http.Request, cardID string) {
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
+		}
+		// Mail arriving and an agent being handed the work are things that happened
+		// to the card, so they join its timeline. Every other kind of link is a fact
+		// about the card rather than an event, and is not logged.
+		if kind, state, isAction := clockStateForEntityLink(req.EntityType); isAction {
+			if err := a.recordEvent(&model.CardEvent{
+				CardID: cardID, Kind: kind, ClockState: state, Actor: actorFrom(r),
+				Summary: l.Label, OccurredAt: l.CreatedAt,
+				Detail: json.RawMessage(fmt.Sprintf(`{"entity_type":%q,"entity_ref":%q}`, req.EntityType, req.EntityRef)),
+			}); err != nil {
+				writeError(w, 500, err.Error())
+				return
+			}
 		}
 		writeJSON(w, 201, l)
 	default:
@@ -857,12 +967,34 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Every card's events in one query, and the board's ladder and working week
+	// once, so a card's time costs no round trips of its own.
+	eventsByCard, err := a.store.ListCardEventsForBoard(boardID)
+	if err != nil {
+		return nil, err
+	}
+	ladder, err := a.store.GetPriorityLadder(boardID)
+	if err != nil {
+		return nil, err
+	}
+	asOf := time.Now().UTC()
+
 	// Bucket by column.
 	byCol := map[string][]model.CardView{}
 	var orphans []model.CardView
 	for i, p := range placements {
 		links, _ := a.store.ListCardLinks(p.CardID)
 		cv := model.CardView{Placement: p, Item: items[i], Links: links}
+		summary, _ := timeaccounting.Compute(timeaccounting.Input{
+			Events: eventsByCard[p.CardID],
+			Level:  ladder.LevelFor(priorityOfItem(items[i])),
+			Hours:  b.BusinessHours,
+			Now:    asOf,
+		})
+		// The segments are the timeline's working, and the timeline endpoint is
+		// where they belong. A board asks how much time, not which stretches of it.
+		summary.Segments = nil
+		cv.Time = summary
 		if items[i] == nil {
 			orphans = append(orphans, cv)
 			continue
@@ -873,5 +1005,5 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	for i, c := range cols {
 		colViews[i] = model.ColumnView{Column: c, Cards: byCol[c.ID]}
 	}
-	return &model.BoardView{Board: b, Columns: colViews, Orphans: orphans}, nil
+	return &model.BoardView{Board: b, Columns: colViews, Orphans: orphans, PriorityLadder: ladder}, nil
 }

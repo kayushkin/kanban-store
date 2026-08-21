@@ -2,18 +2,23 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // Board is a kanban board. Each board defines its own ordered set of columns.
 // Cards (which live in noteboard) attach to a board via Placement rows.
 type Board struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Archived    bool      `json:"archived"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Archived    bool   `json:"archived"`
+	// BusinessHours is the board's working week. Absent means the board reports
+	// wall-clock time only; it is never defaulted, because a guessed zone produces
+	// business figures nobody can check.
+	BusinessHours *BusinessHours `json:"business_hours,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 type CreateBoardRequest struct {
@@ -32,6 +37,16 @@ type UpdateBoardRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 	Archived    *bool   `json:"archived,omitempty"`
+	// BusinessHours replaces the board's working week. Sending an object with an
+	// empty tzid clears it; omitting the field leaves it alone.
+	BusinessHours *BusinessHours `json:"business_hours,omitempty"`
+}
+
+func (r *UpdateBoardRequest) Validate() error {
+	if r.BusinessHours != nil && r.BusinessHours.TZID != "" {
+		return r.BusinessHours.Validate()
+	}
+	return nil
 }
 
 // Column belongs to a Board. Position is a float so reorders are cheap
@@ -39,23 +54,29 @@ type UpdateBoardRequest struct {
 // set, causes a card move into this column to PATCH the noteboard item's
 // status to that value.
 type Column struct {
-	ID         string    `json:"id"`
-	BoardID    string    `json:"board_id"`
-	Name       string    `json:"name"`
-	Position   float64   `json:"position"`
-	Color      string    `json:"color"`
-	WIPLimit   *int      `json:"wip_limit,omitempty"`
-	AutoStatus *string   `json:"auto_status,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string  `json:"id"`
+	BoardID    string  `json:"board_id"`
+	Name       string  `json:"name"`
+	Position   float64 `json:"position"`
+	Color      string  `json:"color"`
+	WIPLimit   *int    `json:"wip_limit,omitempty"`
+	AutoStatus *string `json:"auto_status,omitempty"`
+	// BudgetClockState is what landing in this column means for the budget clock:
+	// "In Progress" runs it, "Blocked" pauses it, "Done" stops it. Absent means a
+	// move here says nothing about the clock and leaves it as it was — which is the
+	// honest default for a column nobody has classified.
+	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 type CreateColumnRequest struct {
-	Name       string   `json:"name"`
-	Position   *float64 `json:"position,omitempty"`
-	Color      *string  `json:"color,omitempty"`
-	WIPLimit   *int     `json:"wip_limit,omitempty"`
-	AutoStatus *string  `json:"auto_status,omitempty"`
+	Name             string      `json:"name"`
+	Position         *float64    `json:"position,omitempty"`
+	Color            *string     `json:"color,omitempty"`
+	WIPLimit         *int        `json:"wip_limit,omitempty"`
+	AutoStatus       *string     `json:"auto_status,omitempty"`
+	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
 }
 
 func (r *CreateColumnRequest) Validate() error {
@@ -64,6 +85,9 @@ func (r *CreateColumnRequest) Validate() error {
 	}
 	if r.AutoStatus != nil && !validStatus(*r.AutoStatus) {
 		return fmt.Errorf("auto_status must be one of: open, done, archived")
+	}
+	if r.BudgetClockState != nil && *r.BudgetClockState != "" && !ValidClockState(*r.BudgetClockState) {
+		return fmt.Errorf("budget_clock_state must be one of: %s", strings.Join(ClockStateNames(), ", "))
 	}
 	return nil
 }
@@ -74,6 +98,18 @@ type UpdateColumnRequest struct {
 	Color      *string  `json:"color,omitempty"`
 	WIPLimit   *int     `json:"wip_limit,omitempty"`
 	AutoStatus *string  `json:"auto_status,omitempty"`
+	// BudgetClockState reclassifies the column. An empty string clears it.
+	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
+}
+
+func (r *UpdateColumnRequest) Validate() error {
+	if r.AutoStatus != nil && *r.AutoStatus != "" && !validStatus(*r.AutoStatus) {
+		return fmt.Errorf("auto_status must be one of: open, done, archived")
+	}
+	if r.BudgetClockState != nil && *r.BudgetClockState != "" && !ValidClockState(*r.BudgetClockState) {
+		return fmt.Errorf("budget_clock_state must be one of: %s", strings.Join(ClockStateNames(), ", "))
+	}
+	return nil
 }
 
 func validStatus(s string) bool {
@@ -213,6 +249,10 @@ type BoardView struct {
 	Board   *Board       `json:"board"`
 	Columns []ColumnView `json:"columns"`
 	Orphans []CardView   `json:"orphans,omitempty"`
+	// PriorityLadder is the board's rungs, so a client can label and colour a card
+	// without asking a second time. An empty ladder means this board ignores
+	// priorities.
+	PriorityLadder *PriorityLadder `json:"priority_ladder,omitempty"`
 }
 
 type ColumnView struct {
@@ -227,6 +267,11 @@ type CardView struct {
 	Placement *Placement `json:"placement"`
 	Item      any        `json:"item"`
 	Links     []CardLink `json:"links,omitempty"`
+	// Time is the card's clock as the board sees it: how long it has been alive,
+	// how much of that counted as workable, and how that sits against the limit
+	// its priority sets. Computed from the card's events on every read, never
+	// stored.
+	Time *CardTimeSummary `json:"time,omitempty"`
 }
 
 type EntityTypeInfo struct {

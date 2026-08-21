@@ -1,12 +1,19 @@
 # kanban-store
 
-A kanban service that stores **where a card sits**, not what it says.
+A kanban service that stores **where a card sits and what has happened to it**.
 
 Boards, columns and placements live here. Card *content* — title, body, tags,
 priority, due date, hold state — lives in a separate [noteboard][noteboard]
 service, and kanban-store holds only the noteboard item id. One item can sit on
 several boards at once; editing it anywhere changes it everywhere, because there
 is only ever one copy.
+
+Its history lives here, though. Every action on a card — created, mail attached,
+handed to an agent, note written, moved, held, finished — is one row in an
+append-only log, and each row carries what that action meant for the card's
+clock. That log is what answers *how long has this taken, how much of it was time
+the work could actually be done, and is that inside the limit its priority sets*.
+See [Time accounting](#time-accounting).
 
 On top of that it keeps two cross-cutting indexes: **card links**, pointing a
 card at an external entity (a repo, a machine, an agent session), and **entity
@@ -114,6 +121,13 @@ how a "Done" column completes the underlying todo.
 column — over the limit returns **409**. Moving a card *within* a column it
 already occupies is not checked, so a full column can still be reordered.
 
+`budget_clock_state` is what landing in this column means for the card's clock:
+`running` (the work is ours to do), `paused` (someone else has the ball) or
+`stopped` (it is finished). Unset means a move here says nothing about the clock
+and leaves it where it was — the honest default for a column nobody has
+classified, and the reason moving between two unclassified columns never invents
+a change.
+
 ### Cards
 
 A card is a noteboard item plus a placement. Board-scoped operations:
@@ -151,6 +165,11 @@ without `parent_id` escapes both.
 
 | Method | Path | Notes |
 |---|---|---|
+| `GET` `POST` | `/api/cards/{id}/events` | The action log. `POST {"kind":…,"clock_state":…,"occurred_at":…,"actor":…,"summary":…}` |
+| `GET` `POST` | `/api/cards/{id}/notes` | Status updates and summaries written onto the card |
+| `GET` | `/api/cards/{id}/timeline` | `?board_id=` — every action in order, with the time between them and the totals |
+| `DELETE` | `/api/notes/{noteID}` | Removes the note's text; its `note_added` event stays |
+| `GET` `PUT` | `/api/boards/{id}/priority-levels` | The board's priority ladder |
 | `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…}` |
 | `DELETE` | `/api/links/{linkID}` | |
 | `GET` | `/api/entities/{type}/{ref}/cards` | Reverse lookup: every card linked to this entity, oldest link first |
@@ -191,6 +210,93 @@ is the author's.
 
 `/api/search` passes the query to noteboard and, with `board_id` or
 `on_board=true`, keeps only results that are actually placed somewhere.
+
+## Time accounting
+
+Three numbers, from one log.
+
+A card's events are walked in order, and **the time between one event and the
+next belongs to the state that event put the card into**. Summing the `running`
+stretches gives the time the work was actually available to be done; summing
+everything gives wall-clock elapsed; the difference is time spent waiting on
+somebody else.
+
+The worked example, which lives as a test:
+
+| At | Action | Clock |
+|---|---|---|
+| 09:00 | mail arrives on a P0 card | running |
+| 09:30 | replied, waiting on legal | paused |
+| 09:30 **+24h** | legal answers | running |
+| +1h | answered the client, done | stopped |
+
+**25.5 hours elapsed. 1.5 hours on the budget clock. A 2-hour limit, met.**
+Judging that card on elapsed time alone would have called it thirteen times over
+its limit.
+
+Nothing is stored but the events. Every figure is recomputed on read, so there
+are no totals to drift out of step with the log, and reclassifying a column
+changes what happens next rather than rewriting what already did — each event
+keeps the clock state that was true when it happened.
+
+### What each action means for the clock
+
+Everything that puts work in front of us runs the clock (`card_created`,
+`card_attached`, `email_received`, `agent_dispatched`, `agent_finished`,
+`note_added`, `card_unheld`, `waiting_ended`); everything that hands the ball over
+pauses it (`card_held`, `waiting_started`); only finishing stops it
+(`card_completed`, `card_detached`). A move takes its state from the destination
+column, because that is where a column's classification is for.
+
+`kind` is deliberately open — record an action this service has never heard of and
+it is kept. What an unknown kind **cannot** do is guess its own clock state, so
+one without an explicit `clock_state` is a **400** rather than a silently invented
+budget figure.
+
+Attaching mail or a session is an action and joins the timeline. `email_msgid` is
+the same arrival under its RFC identity and would double-count it, `email_sender`
+is a learned affinity rather than an event, and a repo or machine link is a fact
+about the card — none of the three is logged.
+
+### Priority ladders
+
+A board's ladder maps a noteboard priority onto a name and a time limit:
+
+```sh
+curl -X PUT localhost:8305/api/boards/$BOARD/priority-levels -d '{"levels":[
+  {"priority_value":5,"label":"P0","budget_seconds":7200},
+  {"priority_value":4,"label":"P1","budget_seconds":28800},
+  {"priority_value":3,"label":"P2","budget_seconds":86400},
+  {"priority_value":2,"label":"P3","budget_seconds":604800},
+  {"priority_value":1,"label":"P4","budget_seconds":2592000}]}'
+```
+
+**P0 is the top rung, and the top rung is the HIGHEST `priority_value`.** noteboard
+sorts priority descending and every list view in the stack depends on that, so the
+P-number is a label on a rung, not the number in the database.
+
+⚠️ **`priority_value` 0 is reserved and rejected with a 400.** Zero is where
+noteboard leaves every card nobody has ranked — the large majority of them — so a
+level defined there would promote the entire unranked backlog to most-urgent. An
+unranked card gets no rung, no label and no limit.
+
+Each board sets its own ladder, and **a board with no levels ignores priorities
+entirely**: its cards carry no limit, whatever their stored priority.
+
+### Business hours
+
+A board may declare a working week, and then reports the same elapsed figures a
+second way alongside the wall-clock ones — never instead of them:
+
+```sh
+curl -X PATCH localhost:8305/api/boards/$BOARD -d '{"business_hours":
+  {"tzid":"America/Los_Angeles","days":["MO","TU","WE","TH","FR"],"start":"09:00","end":"17:00"}}'
+```
+
+`tzid` is mandatory and never defaulted, for the reason noteboard's recurrence
+rules demand one: an offset is not a zone, and hours anchored to one drift an hour
+twice a year. A board without hours reports no business figures at all rather than
+a guessed nine-to-five. Send `{"business_hours":{}}` to clear them.
 
 ## The noteboard contract
 
