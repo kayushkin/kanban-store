@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kayushkin/kanban-store/internal/api"
 	"github.com/kayushkin/kanban-store/internal/db"
@@ -33,6 +34,31 @@ type fakeNoteboard struct {
 
 func newFakeNoteboard() *fakeNoteboard {
 	return &fakeNoteboard{items: map[string]map[string]any{}}
+}
+
+// setHold parks or releases an item the way noteboard does: held_at is a
+// timestamp that is either there or not, and it is deliberately not the item's
+// status — held work is still open work, it just is not cleared to run.
+func (f *fakeNoteboard) setHold(w http.ResponseWriter, id string, held bool, reason string) {
+	f.mu.Lock()
+	it, ok := f.items[id]
+	var out map[string]any
+	if ok {
+		if held {
+			it["held_at"] = time.Now().UTC().Format(time.RFC3339)
+			it["hold_reason"] = reason
+		} else {
+			delete(it, "held_at")
+			delete(it, "hold_reason")
+		}
+		out = clone(it)
+	}
+	f.mu.Unlock()
+	if !ok {
+		writeJSON(w, 404, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (f *fakeNoteboard) handler() http.Handler {
@@ -109,6 +135,21 @@ func (f *fakeNoteboard) handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
+	})
+
+	// The stop/play button. kanban-store forwards a hold straight through to
+	// noteboard, so the fake has to hold state for it or every clock event that
+	// follows a hold goes untested.
+	mux.HandleFunc("POST /api/items/{id}/hold", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		f.setHold(w, r.PathValue("id"), true, req.Reason)
+	})
+
+	mux.HandleFunc("POST /api/items/{id}/unhold", func(w http.ResponseWriter, r *http.Request) {
+		f.setHold(w, r.PathValue("id"), false, "")
 	})
 
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
