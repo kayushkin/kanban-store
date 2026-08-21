@@ -109,6 +109,7 @@ All request and response bodies are JSON.
 | `POST` | `/api/boards/{id}/columns` | `{"name":…,"position":…,"color":…,"wip_limit":…,"auto_status":…}` |
 | `POST` | `/api/boards/{id}/columns/reorder` | `{"columns":[{"id":…,"position":…}]}`; returns the reordered set |
 | `GET` `PATCH` `DELETE` | `/api/columns/{id}` | |
+| `GET` | `/api/columns/{id}/cards` | One column a page at a time: `?limit=&offset=`, with the column's `total` |
 
 `position` is a float, so inserting between two columns means averaging their
 positions rather than renumbering the rest.
@@ -134,7 +135,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans` |
+| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column** |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
 | `DELETE` | `/api/boards/{id}/cards/{cardID}` | Detaches from this board only; the item survives |
@@ -297,6 +298,24 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{"business_hours":
 rules demand one: an offset is not a zone, and hours anchored to one drift an hour
 twice a year. A board without hours reports no business figures at all rather than
 a guessed nine-to-five. Send `{"business_hours":{}}` to clear them.
+
+### Paging a board
+
+Every column carries a `total`, so a client can say *showing 25 of 6,466* rather
+than presenting a page as the whole column. `?limit=` on the board view caps each
+column; `/api/columns/{id}/cards?limit=&offset=` fetches the rest.
+
+Without a limit the board view still returns everything, so existing callers are
+unaffected — but on this host's largest board that is **12 MB and 1.6 seconds per
+read**, on a page that polls every fifteen seconds.
+
+⚠️ **Paging is in stored order, which is not the order a board displays.** What a
+client sorts by — priority, due date, title — lives in noteboard, so ordering a
+whole board here would mean fetching every item on it, which is the cost paging
+exists to avoid. A client showing a page therefore sorts what it has, and has to
+say so on screen. Sorting the full column server-side needs a batch item read on
+noteboard (`GET /api/items?ids=…`), which does not exist yet — see [The noteboard
+contract](#the-noteboard-contract).
 
 ## The noteboard contract
 

@@ -33,8 +33,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/boards", a.boards)
 	mux.HandleFunc("/api/boards/", a.boardsTree)
 
-	// columns (single-resource ops)
-	mux.HandleFunc("/api/columns/", a.columnByID)
+	// columns (single-resource ops, and a column's cards a page at a time)
+	mux.HandleFunc("/api/columns/", a.columnScoped)
 
 	// cards (single-resource ops, including move + delete)
 	mux.HandleFunc("/api/cards/", a.cardScoped)
@@ -277,12 +277,26 @@ func (a *API) reorderColumns(w http.ResponseWriter, r *http.Request, boardID str
 	writeJSON(w, 200, cols)
 }
 
-func (a *API) columnByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/columns/")
-	if id == "" {
+// columnScoped routes /api/columns/:id and /api/columns/:id/cards.
+func (a *API) columnScoped(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/columns/")
+	if rest == "" {
 		writeError(w, 400, "missing column id")
 		return
 	}
+	parts := strings.Split(rest, "/")
+	if len(parts) == 2 && parts[1] == "cards" {
+		a.columnCards(w, r, parts[0])
+		return
+	}
+	if len(parts) != 1 {
+		writeError(w, 404, "not found")
+		return
+	}
+	a.columnByID(w, r, parts[0])
+}
+
+func (a *API) columnByID(w http.ResponseWriter, r *http.Request, id string) {
 	switch r.Method {
 	case "GET":
 		c, err := a.store.GetColumn(id)
@@ -327,7 +341,14 @@ func (a *API) columnByID(w http.ResponseWriter, r *http.Request) {
 func (a *API) boardCards(w http.ResponseWriter, r *http.Request, boardID string) {
 	switch r.Method {
 	case "GET":
-		view, err := a.assembleBoardView(boardID)
+		// A board with 6,466 cards on it answered 12 MB per read, on a page that
+		// polls every fifteen seconds. limit caps each column; the column's own
+		// endpoint fetches the rest a page at a time.
+		limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+		if err != nil {
+			limit = 0
+		}
+		view, err := a.assembleBoardView(boardID, limit)
 		if err != nil {
 			mapDBErr(w, err)
 			return
@@ -945,7 +966,15 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 
 // ============================ Board view assembly ============================
 
-func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
+// assembleBoardView builds the board. limit caps how many cards each column
+// carries, in stored order; 0 means all of them.
+//
+// ⚠️ Paging is in STORED order, which is not the order the board displays. What
+// a client sorts by — priority, due date, title — lives in noteboard, so sorting
+// the whole board server-side would mean fetching every item on it, which is the
+// cost paging exists to avoid. A client showing a page therefore sorts what it
+// has, and has to say so.
+func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, error) {
 	b, err := a.store.GetBoard(boardID)
 	if err != nil {
 		return nil, err
@@ -954,9 +983,21 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	if err != nil {
 		return nil, err
 	}
-	placements, err := a.store.ListPlacementsByBoard(boardID)
-	if err != nil {
-		return nil, err
+	// Per column, so a limit means "this many of each" rather than a slice of one
+	// arbitrary column, and so the count a client needs for "show more" is exact.
+	var placements []*model.Placement
+	totals := map[string]int{}
+	for _, c := range cols {
+		total, err := a.store.CountColumnCards(c.ID)
+		if err != nil {
+			return nil, err
+		}
+		totals[c.ID] = total
+		page, err := a.store.ListPlacementsByColumn(c.ID, limit, 0)
+		if err != nil {
+			return nil, err
+		}
+		placements = append(placements, page...)
 	}
 	// Fetch all noteboard items in one fan-out.
 	ids := make([]string, len(placements))
@@ -967,9 +1008,14 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Every card's events in one query, and the board's ladder and working week
-	// once, so a card's time costs no round trips of its own.
-	eventsByCard, err := a.store.ListCardEventsForBoard(boardID)
+	// Events and links for exactly the cards on screen, one query each. The links
+	// used to be one query per card, which on the largest board here is 6,466 of
+	// them for a single read.
+	eventsByCard, err := a.store.ListCardEventsForCards(ids, boardID)
+	if err != nil {
+		return nil, err
+	}
+	linksByCard, err := a.store.ListCardLinksForCards(ids)
 	if err != nil {
 		return nil, err
 	}
@@ -983,8 +1029,7 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	byCol := map[string][]model.CardView{}
 	var orphans []model.CardView
 	for i, p := range placements {
-		links, _ := a.store.ListCardLinks(p.CardID)
-		cv := model.CardView{Placement: p, Item: items[i], Links: links}
+		cv := model.CardView{Placement: p, Item: items[i], Links: linksByCard[p.CardID]}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],
 			Level:  ladder.LevelFor(priorityOfItem(items[i])),
@@ -1003,7 +1048,7 @@ func (a *API) assembleBoardView(boardID string) (*model.BoardView, error) {
 	}
 	colViews := make([]model.ColumnView, len(cols))
 	for i, c := range cols {
-		colViews[i] = model.ColumnView{Column: c, Cards: byCol[c.ID]}
+		colViews[i] = model.ColumnView{Column: c, Cards: byCol[c.ID], Total: totals[c.ID]}
 	}
 	return &model.BoardView{Board: b, Columns: colViews, Orphans: orphans, PriorityLadder: ladder}, nil
 }

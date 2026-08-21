@@ -258,6 +258,10 @@ type BoardView struct {
 type ColumnView struct {
 	Column *Column    `json:"column"`
 	Cards  []CardView `json:"cards"`
+	// Total is how many cards the column holds, which is not len(Cards) once a
+	// board view has been capped. A client needs both to say "showing 25 of 6,466"
+	// rather than quietly presenting a page as the whole column.
+	Total int `json:"total"`
 }
 
 // CardView combines a placement with its noteboard item content (passed

@@ -567,3 +567,77 @@ func TestEventLogIsAppendOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestBoardViewPagesEachColumn pins the cap that exists because this host's
+// largest board answered twelve megabytes per read, on a page that polls every
+// fifteen seconds.
+func TestBoardViewPagesEachColumn(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+
+	boardID := mkBoard(t, h, "Agent runs")
+	col := mkColumnWithClock(t, h, boardID, "Queued", model.ClockRunning)
+	for i := 0; i < 7; i++ {
+		if w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+			Title: "card " + itoa(i), ColumnID: col,
+		}); w.Code != 201 {
+			t.Fatalf("create: %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	var view model.BoardView
+	decode(t, do(t, h, "GET", "/api/boards/"+boardID+"/cards?limit=3", nil), &view)
+	if got := len(view.Columns[0].Cards); got != 3 {
+		t.Errorf("page carried %d cards, want 3", got)
+	}
+	// The total is what lets a client say "showing 3 of 7" instead of presenting
+	// a page as the whole column.
+	if got := view.Columns[0].Total; got != 7 {
+		t.Errorf("total = %d, want 7", got)
+	}
+
+	// No limit still means the whole board, so every existing caller is unaffected.
+	decode(t, do(t, h, "GET", "/api/boards/"+boardID+"/cards", nil), &view)
+	if got := len(view.Columns[0].Cards); got != 7 {
+		t.Errorf("unpaged read carried %d cards, want all 7", got)
+	}
+}
+
+// TestColumnCardsServesTheRest pins "show more": the next page of one column,
+// in the same stored order the board view paged in, so appending it cannot
+// duplicate or skip a card.
+func TestColumnCardsServesTheRest(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+
+	boardID := mkBoard(t, h, "Agent runs")
+	col := mkColumnWithClock(t, h, boardID, "Queued", model.ClockRunning)
+	for i := 0; i < 5; i++ {
+		do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+			Title: "card " + itoa(i), ColumnID: col,
+		})
+	}
+
+	var first model.BoardView
+	decode(t, do(t, h, "GET", "/api/boards/"+boardID+"/cards?limit=2", nil), &first)
+	var next model.ColumnView
+	decode(t, do(t, h, "GET", "/api/columns/"+col+"/cards?limit=2&offset=2", nil), &next)
+
+	if len(next.Cards) != 2 || next.Total != 5 {
+		t.Fatalf("next page carried %d of %d, want 2 of 5", len(next.Cards), next.Total)
+	}
+	seen := map[string]bool{}
+	for _, c := range first.Columns[0].Cards {
+		seen[c.Placement.CardID] = true
+	}
+	for _, c := range next.Cards {
+		if seen[c.Placement.CardID] {
+			t.Errorf("card %s appeared on both pages; paging must not overlap", c.Placement.CardID)
+		}
+	}
+	// A page carries the same per-card time a board view does, or "show more"
+	// would hand back cards that render without their clock.
+	if next.Cards[0].Time == nil {
+		t.Error("paged card carried no time summary")
+	}
+}

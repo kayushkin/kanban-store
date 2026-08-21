@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -349,4 +350,107 @@ func EventTime(at *time.Time) time.Time {
 		return now()
 	}
 	return at.UTC()
+}
+
+// ============================ Paged reads ============================
+
+// ListPlacementsByColumn returns one column's cards in stored order, a page at a
+// time. limit <= 0 means the whole column.
+//
+// Stored order is the only order this service can page in: what a board sorts by
+// on screen — priority, due date, title — lives in noteboard, and kanban-store
+// would have to fetch every item on the board to sort by it, which is the cost
+// paging exists to avoid.
+func (s *Store) ListPlacementsByColumn(columnID string, limit, offset int) ([]*model.Placement, error) {
+	q := `SELECT card_id, board_id, column_id, position, created_at, updated_at
+	      FROM placements WHERE column_id=? ORDER BY position ASC, created_at ASC`
+	args := []any{columnID}
+	if limit > 0 {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.Placement{}
+	for rows.Next() {
+		p := &model.Placement{}
+		if err := rows.Scan(&p.CardID, &p.BoardID, &p.ColumnID, &p.Position, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListCardLinksForCards fetches the links of many cards in one query, grouped by
+// card. The board view used to ask per card, which is 6,466 queries on this
+// host's largest board.
+func (s *Store) ListCardLinksForCards(cardIDs []string) (map[string][]model.CardLink, error) {
+	out := map[string][]model.CardLink{}
+	if len(cardIDs) == 0 {
+		return out, nil
+	}
+	q := `SELECT id, card_id, entity_type, entity_ref, label, created_at FROM card_links
+	      WHERE card_id IN (` + placeholders(len(cardIDs)) + `) ORDER BY created_at ASC`
+	rows, err := s.db.Query(q, anySlice(cardIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var l model.CardLink
+		if err := rows.Scan(&l.ID, &l.CardID, &l.EntityType, &l.EntityRef, &l.Label, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[l.CardID] = append(out[l.CardID], l)
+	}
+	return out, rows.Err()
+}
+
+// ListCardEventsForCards fetches the events of many cards in one query, scoped to
+// a board the way ListCardEvents is: that board's events plus the card-wide ones.
+func (s *Store) ListCardEventsForCards(cardIDs []string, boardID string) (map[string][]model.CardEvent, error) {
+	out := map[string][]model.CardEvent{}
+	if len(cardIDs) == 0 {
+		return out, nil
+	}
+	q := `SELECT ` + cardEventColumns + ` FROM card_events
+	      WHERE card_id IN (` + placeholders(len(cardIDs)) + `)`
+	args := anySlice(cardIDs)
+	if boardID != "" {
+		q += ` AND (board_id = ? OR board_id = '')`
+		args = append(args, boardID)
+	}
+	q += ` ORDER BY occurred_at ASC, recorded_at ASC, id ASC`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		e, err := scanCardEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[e.CardID] = append(out[e.CardID], e)
+	}
+	return out, rows.Err()
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+func anySlice(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }

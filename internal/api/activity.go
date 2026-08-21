@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,4 +316,83 @@ func (a *API) notesByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.noteByID(w, r, noteID)
+}
+
+// columnCards serves one column's cards a page at a time — what "show more"
+// calls once a board view has been capped.
+//
+// The page is in STORED order, the same order the board view pages in, because
+// it is the only order kanban-store owns. A caller appending a page to what it
+// already has re-sorts the result itself.
+func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID string) {
+	if r.Method != "GET" {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	col, err := a.store.GetColumn(columnID)
+	if err != nil {
+		mapDBErr(w, err)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	total, err := a.store.CountColumnCards(columnID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	placements, err := a.store.ListPlacementsByColumn(columnID, limit, offset)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	ids := make([]string, len(placements))
+	for i, p := range placements {
+		ids[i] = p.CardID
+	}
+	items, err := a.noteboard.GetItems(ids)
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	linksByCard, err := a.store.ListCardLinksForCards(ids)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	eventsByCard, err := a.store.ListCardEventsForCards(ids, col.BoardID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	board, err := a.store.GetBoard(col.BoardID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	ladder, err := a.store.GetPriorityLadder(col.BoardID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	asOf := time.Now().UTC()
+	cards := make([]model.CardView, 0, len(placements))
+	for i, p := range placements {
+		summary, _ := timeaccounting.Compute(timeaccounting.Input{
+			Events: eventsByCard[p.CardID],
+			Level:  ladder.LevelFor(priorityOfItem(items[i])),
+			Hours:  board.BusinessHours,
+			Now:    asOf,
+		})
+		summary.Segments = nil
+		cards = append(cards, model.CardView{
+			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Time: summary,
+		})
+	}
+	writeJSON(w, 200, model.ColumnView{Column: col, Cards: cards, Total: total})
 }
