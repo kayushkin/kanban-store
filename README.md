@@ -194,8 +194,11 @@ is the author's.
 
 ## The noteboard contract
 
-kanban-store calls **seven** noteboard endpoints. Anything that answers these can
-stand in for noteboard — point `KANBAN_NOTEBOARD_URL` at it. Items are treated
+kanban-store calls **seven** noteboard endpoints through **eight** client methods — the
+table below has eight rows because a plain `DELETE` and `DELETE …?hard=true` are the same
+endpoint with a different query. Seven is the number to implement; count
+`http.NewRequest` in `internal/noteboard/client.go` to check it. Anything that answers
+these can stand in for noteboard — point `KANBAN_NOTEBOARD_URL` at it. Items are treated
 as opaque JSON and passed through untouched, so an implementation may carry any
 extra fields it likes; the only one kanban-store reads is `id`.
 
