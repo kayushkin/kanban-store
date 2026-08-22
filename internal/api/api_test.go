@@ -256,8 +256,20 @@ func do(t *testing.T, h http.Handler, method, path string, body any) *httptest.R
 	return w
 }
 
-func decode(t *testing.T, w *httptest.ResponseRecorder, v any) {
+// decodeSuccessfulResponse reads a response body the server answered successfully.
+//
+// The status check is the point of it. A body is only a result once the status
+// says so; an error body is JSON too, and decoding {"error":"..."} into a struct
+// succeeds and leaves a zero value. The test then fails several assertions later
+// on a missing field or a short slice and names the wrong subsystem -- or, when
+// the zero value carries a nil pointer, panics and takes every other test in the
+// package down with it. Failing here instead reports the request that actually
+// failed, with its status and body.
+func decodeSuccessfulResponse(t *testing.T, w *httptest.ResponseRecorder, v any) {
 	t.Helper()
+	if w.Code < 200 || w.Code > 299 {
+		t.Fatalf("request failed: %d %s", w.Code, w.Body.String())
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), v); err != nil {
 		t.Fatalf("decode response %q: %v", w.Body.String(), err)
 	}
@@ -271,7 +283,7 @@ func mkBoard(t *testing.T, h http.Handler, name string) string {
 		t.Fatalf("create board: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var b model.Board
-	decode(t, w, &b)
+	decodeSuccessfulResponse(t, w, &b)
 	return b.ID
 }
 
@@ -288,7 +300,7 @@ func mkColumn(t *testing.T, h http.Handler, boardID, name, autoStatus string) st
 		t.Fatalf("create column: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var c model.Column
-	decode(t, w, &c)
+	decodeSuccessfulResponse(t, w, &c)
 	return c.ID
 }
 
@@ -303,7 +315,7 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	decode(t, w, &resp)
+	decodeSuccessfulResponse(t, w, &resp)
 	if resp["status"] != "ok" {
 		t.Fatalf("expected status ok, got %v", resp["status"])
 	}
@@ -322,7 +334,7 @@ func TestBoardCRUD(t *testing.T) {
 		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var b model.Board
-	decode(t, w, &b)
+	decodeSuccessfulResponse(t, w, &b)
 	if b.Name != "Board A" || b.Description != "my board" {
 		t.Fatalf("unexpected board: %+v", b)
 	}
@@ -339,7 +351,7 @@ func TestBoardCRUD(t *testing.T) {
 		t.Fatalf("list: expected 200, got %d", w.Code)
 	}
 	var boards []model.Board
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	if len(boards) != 1 {
 		t.Fatalf("expected 1 board, got %d", len(boards))
 	}
@@ -352,19 +364,19 @@ func TestBoardCRUD(t *testing.T) {
 		t.Fatalf("patch: expected 200, got %d", w.Code)
 	}
 	var updated model.Board
-	decode(t, w, &updated)
+	decodeSuccessfulResponse(t, w, &updated)
 	if updated.Name != "Board A2" || !updated.Archived {
 		t.Fatalf("patch did not apply: %+v", updated)
 	}
 
 	// Archived board is excluded from the default list but included with include_archived.
 	w = do(t, h, "GET", "/api/boards", nil)
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	if len(boards) != 0 {
 		t.Fatalf("archived board should be hidden, got %d", len(boards))
 	}
 	w = do(t, h, "GET", "/api/boards?include_archived=true", nil)
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	if len(boards) != 1 {
 		t.Fatalf("include_archived should show board, got %d", len(boards))
 	}
@@ -418,7 +430,7 @@ func TestColumnCRUD(t *testing.T) {
 		t.Fatalf("create column: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var c model.Column
-	decode(t, w, &c)
+	decodeSuccessfulResponse(t, w, &c)
 	if c.Name != "Todo" || c.BoardID != boardID {
 		t.Fatalf("unexpected column: %+v", c)
 	}
@@ -426,7 +438,7 @@ func TestColumnCRUD(t *testing.T) {
 	// List
 	w = do(t, h, "GET", "/api/boards/"+boardID+"/columns", nil)
 	var cols []model.Column
-	decode(t, w, &cols)
+	decodeSuccessfulResponse(t, w, &cols)
 	if len(cols) != 1 {
 		t.Fatalf("expected 1 column, got %d", len(cols))
 	}
@@ -443,7 +455,7 @@ func TestColumnCRUD(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("patch column: expected 200, got %d", w.Code)
 	}
-	decode(t, w, &c)
+	decodeSuccessfulResponse(t, w, &c)
 	if c.Name != "In Progress" || c.AutoStatus == nil || *c.AutoStatus != "open" {
 		t.Fatalf("patch did not apply: %+v", c)
 	}
@@ -501,7 +513,7 @@ func TestReorderColumns(t *testing.T) {
 		t.Fatalf("reorder: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var cols []model.Column
-	decode(t, w, &cols)
+	decodeSuccessfulResponse(t, w, &cols)
 	if len(cols) != 3 {
 		t.Fatalf("expected 3 columns, got %d", len(cols))
 	}
@@ -527,7 +539,7 @@ func TestCardCreateAndDelete(t *testing.T) {
 		t.Fatalf("create card: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	if cv.Placement == nil || cv.Placement.ColumnID != colID {
 		t.Fatalf("placement not set: %+v", cv.Placement)
 	}
@@ -542,7 +554,7 @@ func TestCardCreateAndDelete(t *testing.T) {
 		t.Fatalf("board view: expected 200, got %d", w.Code)
 	}
 	var view model.BoardView
-	decode(t, w, &view)
+	decodeSuccessfulResponse(t, w, &view)
 	if len(view.Columns) != 1 || len(view.Columns[0].Cards) != 1 {
 		t.Fatalf("expected 1 card in 1 column, got %+v", view.Columns)
 	}
@@ -571,7 +583,7 @@ func TestCardCreateAutoStatus(t *testing.T) {
 		t.Fatalf("create card: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	if got := nb.status(cv.Placement.CardID); got != "done" {
 		t.Fatalf("expected auto_status done on create, got %q", got)
 	}
@@ -589,7 +601,7 @@ func TestCardMoveAutoStatus(t *testing.T) {
 	// Create a card in Todo.
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "Move me", ColumnID: todo})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 	if nb.status(cardID) != "open" {
 		t.Fatalf("precondition: expected open, got %q", nb.status(cardID))
@@ -603,7 +615,7 @@ func TestCardMoveAutoStatus(t *testing.T) {
 		t.Fatalf("move: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
-	decode(t, w, &resp)
+	decodeSuccessfulResponse(t, w, &resp)
 	if resp["auto_status_applied"] != "done" {
 		t.Fatalf("expected auto_status_applied=done, got %v", resp["auto_status_applied"])
 	}
@@ -614,7 +626,7 @@ func TestCardMoveAutoStatus(t *testing.T) {
 	// Placements lookup should reflect the new column.
 	w = do(t, h, "GET", "/api/cards/"+cardID+"/placements", nil)
 	var ps []model.Placement
-	decode(t, w, &ps)
+	decodeSuccessfulResponse(t, w, &ps)
 	if len(ps) != 1 || ps[0].ColumnID != done {
 		t.Fatalf("placement not moved: %+v", ps)
 	}
@@ -654,7 +666,7 @@ func TestWIPLimit(t *testing.T) {
 	limit := 1
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/columns", model.CreateColumnRequest{Name: "Tight", WIPLimit: &limit})
 	var c model.Column
-	decode(t, w, &c)
+	decodeSuccessfulResponse(t, w, &c)
 
 	// First card fits.
 	if w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "one", ColumnID: c.ID}); w.Code != 201 {
@@ -705,7 +717,7 @@ func TestCardLinks(t *testing.T) {
 	colID := mkColumn(t, h, boardID, "Todo", "")
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "linked", ColumnID: colID})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 
 	// Create a link.
@@ -717,7 +729,7 @@ func TestCardLinks(t *testing.T) {
 		t.Fatalf("create link: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var link model.CardLink
-	decode(t, w, &link)
+	decodeSuccessfulResponse(t, w, &link)
 	if link.EntityType != "session" || link.EntityRef != "sess-123" {
 		t.Fatalf("unexpected link: %+v", link)
 	}
@@ -725,7 +737,7 @@ func TestCardLinks(t *testing.T) {
 	// List links.
 	w = do(t, h, "GET", "/api/cards/"+cardID+"/links", nil)
 	var links []model.CardLink
-	decode(t, w, &links)
+	decodeSuccessfulResponse(t, w, &links)
 	if len(links) != 1 {
 		t.Fatalf("expected 1 link, got %d", len(links))
 	}
@@ -736,7 +748,7 @@ func TestCardLinks(t *testing.T) {
 		t.Fatalf("entity cards: expected 200, got %d", w.Code)
 	}
 	var ec []map[string]any
-	decode(t, w, &ec)
+	decodeSuccessfulResponse(t, w, &ec)
 	if len(ec) != 1 || ec[0]["card_id"] != cardID {
 		t.Fatalf("expected the linked card, got %+v", ec)
 	}
@@ -774,7 +786,7 @@ func TestEntityCardsAreOldestLinkFirst(t *testing.T) {
 	for _, title := range []string{"dispatch", "classified once", "classified twice"} {
 		w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: title, ColumnID: colID})
 		var cv model.CardView
-		decode(t, w, &cv)
+		decodeSuccessfulResponse(t, w, &cv)
 		cardID := cv.Placement.CardID
 		wantOrder = append(wantOrder, cardID)
 		if w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
@@ -789,7 +801,7 @@ func TestEntityCardsAreOldestLinkFirst(t *testing.T) {
 		t.Fatalf("entity cards: expected 200, got %d", w.Code)
 	}
 	var got []map[string]any
-	decode(t, w, &got)
+	decodeSuccessfulResponse(t, w, &got)
 	if len(got) != len(wantOrder) {
 		t.Fatalf("expected %d cards, got %d: %+v", len(wantOrder), len(got), got)
 	}
@@ -807,7 +819,9 @@ func TestSearch(t *testing.T) {
 	defer cleanup()
 	boardID := mkBoard(t, h, "Board")
 	colID := mkColumn(t, h, boardID, "Todo", "")
-	do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "Findable card", ColumnID: colID})
+	if w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "Findable card", ColumnID: colID}); w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
 
 	// Plain search delegates to noteboard.
 	w := do(t, h, "GET", "/api/search?q=Findable", nil)
@@ -815,14 +829,14 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("search: expected 200, got %d", w.Code)
 	}
 	var items []map[string]any
-	decode(t, w, &items)
+	decodeSuccessfulResponse(t, w, &items)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 search result, got %d", len(items))
 	}
 
 	// on_board=true keeps only items with a placement (the created card qualifies).
 	w = do(t, h, "GET", "/api/search?q=Findable&on_board=true", nil)
-	decode(t, w, &items)
+	decodeSuccessfulResponse(t, w, &items)
 	if len(items) != 1 {
 		t.Fatalf("on_board search: expected 1, got %d", len(items))
 	}
