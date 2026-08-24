@@ -210,6 +210,21 @@ type CreateCardLinkRequest struct {
 	EntityType string  `json:"entity_type"`
 	EntityRef  string  `json:"entity_ref"`
 	Label      *string `json:"label,omitempty"`
+	// OccurredAt backdates the ACTION a link records, for the link types that
+	// record one. It is the same field, for the same reason, as the one on
+	// CreateCardEventRequest: a classifier reads a mailbox on a cadence, so the
+	// mail it files arrived before anything here heard about it. Without this,
+	// attaching week-old mail reported it as arriving now, and every card built
+	// by filing a backlog carried a timeline that began the moment it was filed.
+	//
+	// It does NOT move the link's own CreatedAt. When the link was recorded and
+	// when the thing happened are two different facts, and the event type here
+	// already keeps them apart as RecordedAt and OccurredAt.
+	//
+	// Sending it with a link type that records no action is an error rather than
+	// a no-op — see the handler. Silently ignoring it would let a caller believe
+	// it had backdated something it had not.
+	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
 
 func (r *CreateCardLinkRequest) Validate() error {

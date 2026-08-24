@@ -641,3 +641,117 @@ func TestColumnCardsServesTheRest(t *testing.T) {
 		t.Error("paged card carried no time summary")
 	}
 }
+
+// linkTestCard builds a board with one column and one card on it, which is the
+// minimum a link test needs.
+func linkTestCard(t *testing.T, h http.Handler) string {
+	t.Helper()
+	boardID := mkBoard(t, h, "Links")
+	columnID := mkColumn(t, h, boardID, "Todo", "")
+	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{
+		Title: "A card with links", ColumnID: columnID,
+	})
+	if w.Code != 201 {
+		t.Fatalf("create card: %d %s", w.Code, w.Body.String())
+	}
+	var card model.CardView
+	decode(t, w, &card)
+	return card.Placement.CardID
+}
+
+// A link that records an action can be backdated, because the action and the
+// filing of it are two different moments. This is the path a classifier takes
+// when it works through a backlog: the mail arrived days before anything here
+// heard about it.
+func TestABackdatedEmailLinkFilesTheArrivalWhenItHappened(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	arrived := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
+	w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "email",
+		EntityRef:  "demo-work:lm0001",
+		OccurredAt: &arrived,
+	})
+	if w.Code != 201 {
+		t.Fatalf("status %d, want 201: %s", w.Code, w.Body)
+	}
+
+	var link model.CardLink
+	if err := json.Unmarshal(w.Body.Bytes(), &link); err != nil {
+		t.Fatalf("decode link: %v", err)
+	}
+	// The link itself records when we filed it, not when the mail arrived.
+	if time.Since(link.CreatedAt) > time.Minute {
+		t.Fatalf("link created_at %s was backdated; it should record the filing", link.CreatedAt)
+	}
+
+	var events []model.CardEvent
+	w = do(t, h, "GET", "/api/cards/"+cardID+"/events", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	var arrival *model.CardEvent
+	for i := range events {
+		if events[i].Kind == model.EventEmailReceived {
+			arrival = &events[i]
+		}
+	}
+	if arrival == nil {
+		t.Fatal("no email_received event recorded for the link")
+	}
+	if !arrival.OccurredAt.Equal(arrived) {
+		t.Fatalf("arrival occurred_at %s, want %s", arrival.OccurredAt, arrived)
+	}
+	if time.Since(arrival.RecordedAt) > time.Minute {
+		t.Fatalf("recorded_at %s was backdated too; it must keep saying when we heard", arrival.RecordedAt)
+	}
+}
+
+// Backdating a link that records no action is refused. Answering 201 would let
+// the caller believe it had moved something on a timeline it never touched.
+func TestBackdatingAFactLinkIsRefused(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	when := time.Now().UTC().Add(-time.Hour)
+	for _, entityType := range []string{"repo", "git_repo", "email_msgid", "email_sender"} {
+		t.Run(entityType, func(t *testing.T) {
+			w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+				EntityType: entityType,
+				EntityRef:  "something-" + entityType,
+				OccurredAt: &when,
+			})
+			if w.Code != 400 {
+				t.Fatalf("status %d, want 400: %s", w.Code, w.Body)
+			}
+		})
+	}
+}
+
+// Without occurred_at the behaviour is unchanged: the arrival is stamped when
+// the link was made.
+func TestALinkWithoutOccurredAtStillStampsNow(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "email", EntityRef: "demo-work:lm0002",
+	})
+	if w.Code != 201 {
+		t.Fatalf("status %d, want 201: %s", w.Code, w.Body)
+	}
+	var events []model.CardEvent
+	w = do(t, h, "GET", "/api/cards/"+cardID+"/events", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	for _, e := range events {
+		if e.Kind == model.EventEmailReceived && time.Since(e.OccurredAt) > time.Minute {
+			t.Fatalf("arrival stamped %s without being asked to backdate", e.OccurredAt)
+		}
+	}
+}

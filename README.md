@@ -171,7 +171,7 @@ without `parent_id` escapes both.
 | `GET` | `/api/cards/{id}/timeline` | `?board_id=` — every action in order, with the time between them and the totals |
 | `DELETE` | `/api/notes/{noteID}` | Removes the note's text; its `note_added` event stays |
 | `GET` `PUT` | `/api/boards/{id}/priority-levels` | The board's priority ladder |
-| `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…}` |
+| `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…,"occurred_at":…}` |
 | `DELETE` | `/api/links/{linkID}` | |
 | `GET` | `/api/entities/{type}/{ref}/cards` | Reverse lookup: every card linked to this entity, oldest link first |
 
@@ -258,6 +258,21 @@ Attaching mail or a session is an action and joins the timeline. `email_msgid` i
 the same arrival under its RFC identity and would double-count it, `email_sender`
 is a learned affinity rather than an event, and a repo or machine link is a fact
 about the card — none of the three is logged.
+
+`occurred_at` on a link backdates that action, for the same reason the field
+exists on an event: a classifier reads a mailbox on a cadence, so the mail it
+files arrived before anything here heard about it. Without it, attaching
+week-old mail reported it as arriving now, and a card built by filing a backlog
+carried a timeline that began the moment it was filed.
+
+It does **not** move the link's own `created_at`. When the link was recorded and
+when the thing happened are two different facts, and events here already keep
+them apart as `recorded_at` and `occurred_at`.
+
+Sending `occurred_at` with a link type that records no action is a **400**, not a
+no-op. Backdating a `repo` link is a caller misunderstanding what the link is,
+and answering 201 would let it believe it had moved something on a timeline it
+never touched.
 
 ### Priority ladders
 

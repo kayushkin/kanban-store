@@ -747,18 +747,34 @@ func (a *API) cardLinks(w http.ResponseWriter, r *http.Request, cardID string) {
 			writeError(w, 400, err.Error())
 			return
 		}
+		// Mail arriving and an agent being handed the work are things that happened
+		// to the card, so they join its timeline. Every other kind of link is a fact
+		// about the card rather than an event, and is not logged.
+		kind, state, isAction := clockStateForEntityLink(req.EntityType)
+		if req.OccurredAt != nil && !isAction {
+			// Refused rather than ignored. A caller that backdates a repo link has
+			// misunderstood what the link is, and answering 201 would let it believe
+			// it had moved something on the timeline.
+			writeError(w, 400, fmt.Sprintf(
+				"occurred_at is only meaningful for a link that records an action; %q records a fact about the card and is never logged",
+				req.EntityType))
+			return
+		}
 		l, err := a.store.CreateCardLink(cardID, &req)
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
-		// Mail arriving and an agent being handed the work are things that happened
-		// to the card, so they join its timeline. Every other kind of link is a fact
-		// about the card rather than an event, and is not logged.
-		if kind, state, isAction := clockStateForEntityLink(req.EntityType); isAction {
+		if isAction {
+			// The link's CreatedAt is when we recorded it; occurred_at is when it
+			// happened. They differ for anything filed off a backlog.
+			occurred := l.CreatedAt
+			if req.OccurredAt != nil {
+				occurred = *req.OccurredAt
+			}
 			if err := a.recordEvent(&model.CardEvent{
 				CardID: cardID, Kind: kind, ClockState: state, Actor: actorFrom(r),
-				Summary: l.Label, OccurredAt: l.CreatedAt,
+				Summary: l.Label, OccurredAt: occurred,
 				Detail: json.RawMessage(fmt.Sprintf(`{"entity_type":%q,"entity_ref":%q}`, req.EntityType, req.EntityRef)),
 			}); err != nil {
 				writeError(w, 500, err.Error())
