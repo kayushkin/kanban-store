@@ -2,8 +2,8 @@
 """Seed a board of synthetic software-team work emails, for exercising the
 email classifier and the card action timeline.
 
-Every card here is fiction. Nothing in it came from a real mailbox, no message
-it links to exists in mailstack, and the addresses are all under .example. The
+The mail is fiction. Nothing in it came from a real mailbox, no message it
+links to exists in mailstack, and the addresses are all under .example. The
 point is to give the timeline something to draw: cards that ran over their
 limit and cards that met it, long stretches of waiting on somebody else, agent
 dispatches, coding updates, notes a person wrote, deadlines already missed and
@@ -22,6 +22,11 @@ week-old mail produces exactly this shape, an email that arrived long before
 anything on this host heard about it. The clock figures are unaffected — the
 event carries its column's clock state and the totals are walked from the
 first event forward.
+
+The code is not fiction. The cards that shipped something link to
+github.com/kayushkin/northwind-api — real commits, real pull requests, one
+merged, one open as a draft and one closed unmerged — so a link on the board
+opens the diff it names.
 
     ./scripts/seed_work_board.py            # create the board and its cards
     ./scripts/seed_work_board.py --purge    # hard-delete the cards, then the board
@@ -76,6 +81,37 @@ PRIORITY_LEVELS = [
     {"priority_value": 1, "label": "P4", "budget_seconds": 30 * 24 * 3600},
 ]
 
+# The repository the coding cards did their work in. Real, unlike the mail:
+# northwind-api is a live GitHub repo with the commits and pull requests these
+# cards name, so a link on the board opens the actual diff.
+#
+# Three ref shapes, matching what kanban-store's entity registry already says
+# about the first two:
+#   repo         — a filesystem path on this host; nothing resolves it upstream
+#   git_repo     — the remote URL
+#   pull_request — "owner/name#number", the canonical GitHub identity of a PR.
+#                  Repo-qualified because a bare number names a different PR in
+#                  every repository that has one.
+#   commit       — "owner/name@<full sha>". Full, never abbreviated: an
+#                  abbreviation is a prefix that stays unique right up until it
+#                  does not.
+#
+# pull_request and commit are not in kanban-store's entity-type registry.
+# entity_type is not validated, so the links store and read back fine; what they
+# cannot do is tell a client where to resolve them. Registering them is an edit
+# to internal/config/entity_types.go and a redeploy.
+REPO_SLUG = "kayushkin/northwind-api"
+REPO_URL = f"https://github.com/{REPO_SLUG}"
+
+
+def pull_request(number: int, label: str) -> tuple[str, str, str]:
+    return ("pull_request", f"{REPO_SLUG}#{number}", label)
+
+
+def commit(sha: str, label: str) -> tuple[str, str, str]:
+    return ("commit", f"{REPO_SLUG}@{sha}", label)
+
+
 # Each card: what the work is, where it sits, what it links to, and what has
 # happened to it. Hours are counted back from the moment the seed runs, so a
 # freshly seeded board always reads as though the work happened this week.
@@ -107,13 +143,20 @@ CARDS = [
              "Handed to claude-code: implement cursor pagination in search-api"),
             ("note", 117, "coding-update", "claude-code",
              "Added an `after` cursor to the query planner, migrated 3 call sites, 11 tests green. "
-             "Draft PR #4471."),
-            (116.5, "agent_finished", "claude-code", "PR #4471 opened, CI green"),
+             "Draft PR #1."),
+            (116.5, "agent_finished", "claude-code", "PR #1 opened, CI green"),
             (116, "waiting_started", "vlad", "Sent for review to the mobile team"),
             (50, "waiting_ended", "dinesh.okonkwo@northwind-eng.example", "Review approved"),
             ("note", 49, "status", "vlad", "Merged and deployed to staging behind the flag."),
             (48.5, "card_moved", "vlad", "Moved to Action completed", "stopped"),
             (48, "card_completed", "vlad", "Shipped in the 2026-08-22 release"),
+        ],
+        "code": [
+            pull_request(1, "Replace offset paging on /v1/search with cursors — merged"),
+            commit("38002c5aa26ab39ed01adf52aae07c2675288fc5", "Give search results a total order to page along"),
+            commit("72014ee399c11f55073eca7f552b9de0f3e36236", "Add an opaque cursor over the (score, id) order"),
+            commit("d24062b3a57cd732e52ea0bcbeb927dc386e7618", "Serve cursor pages from /v1/search, keeping offset behind a flag"),
+            commit("3bf6a7dee4ad8ba48a7691aea21b78919becd18d", "Squash merge onto main"),
         ],
     },
     {
@@ -166,6 +209,11 @@ CARDS = [
             (70, "card_moved", "vlad", "Moved to Action completed — cancelled by the requester", "stopped"),
             (69.9, "card_completed", "vlad", "Cancelled, not delivered"),
         ],
+        "code": [
+            pull_request(3, "Spike: move the catalogue cache to Valkey — closed unmerged"),
+            commit("a7d905e4d72e14ebdbfeb859cce8fc63226d2053", "Benchmark the catalogue read path against a cache"),
+            commit("f9be9d77e4c8f4895020c54da9695dbe6953486b", "Write up what the Valkey spike measured"),
+        ],
     },
     {
         "title": "Update the SSO rollout task to include SCIM provisioning",
@@ -187,12 +235,17 @@ CARDS = [
              "Scope grew: SCIM is its own API surface, not a flag on the existing one. Re-estimating."),
             (7, "agent_dispatched", "vlad",
              "Handed to claude-code: scaffold the SCIM /Users endpoint behind a feature flag"),
-            (5, "agent_finished", "claude-code", "Scaffold plus 18 tests, PR #4488 (draft)"),
+            (5, "agent_finished", "claude-code", "Scaffold plus tests, PR #2 (draft)"),
             (4, "email_received", "priya.raman@northwind-eng.example",
              "Follow-up: include group sync in the same rollout."),
             ("note", 3.5, "coding-update", "claude-code",
              "Group sync folded into the same PR. Deprovisioning is still unhandled — it needs a decision "
              "on what happens to orphaned sessions."),
+        ],
+        "code": [
+            pull_request(2, "Extend the SSO rollout to include SCIM provisioning — draft"),
+            commit("a827ccd3365968c197913bd262395941ad013d08", "Scaffold the SCIM /Users endpoint behind a feature flag"),
+            commit("ab9c005476d87d61d4162cffddfa5bedc0a6b410", "Add SCIM group sync to the same rollout"),
         ],
     },
     {
@@ -303,6 +356,9 @@ CARDS = [
              "Low priority: bump the build image to Node 22 LTS when there is a gap."),
             ("note", 99, "status", "vlad", "Queued behind the SSO work."),
         ],
+        # Repo but no PR: nobody has started, which is a shape worth having on
+        # the board next to the cards that have shipped code.
+        "code": [],
     },
 ]
 
@@ -347,7 +403,7 @@ def stamp(now: datetime, hours_ago: float) -> str:
     return (now - timedelta(hours=hours_ago)).isoformat().replace("+00:00", "Z")
 
 
-def seed(base_url: str, board_name: str) -> None:
+def seed(base_url: str, board_name: str, repo_path: str) -> None:
     if find_board(base_url, board_name) is not None:
         raise ApiError(
             f'a board named "{board_name}" already exists. '
@@ -408,6 +464,24 @@ def seed(base_url: str, board_name: str) -> None:
             "entity_ref": spec["sender"],
         })
 
+        # The code the card produced. A card that touched the repo at all links
+        # to it both ways — the path an agent would cd into, and the URL a human
+        # would open — and then to whichever pull requests and commits came out
+        # of it. Neither records a timeline event: kanban-store treats a repo,
+        # a PR or a commit as a fact about the card rather than something that
+        # happened to it, and only email and session links are actions.
+        if "code" in spec:
+            request(base_url, "POST", f"/api/cards/{card_id}/links", {
+                "entity_type": "repo", "entity_ref": repo_path, "label": REPO_SLUG,
+            })
+            request(base_url, "POST", f"/api/cards/{card_id}/links", {
+                "entity_type": "git_repo", "entity_ref": REPO_URL, "label": REPO_SLUG,
+            })
+            for entity_type, entity_ref, label in spec["code"]:
+                request(base_url, "POST", f"/api/cards/{card_id}/links", {
+                    "entity_type": entity_type, "entity_ref": entity_ref, "label": label,
+                })
+
         arrivals = iter(spec["messages"])
         for entry in spec["events"]:
             if entry[0] == "note":
@@ -444,7 +518,8 @@ def seed(base_url: str, board_name: str) -> None:
             request(base_url, "POST", f"/api/cards/{card_id}/hold", {"reason": spec["hold_reason"]})
 
         held = " (held)" if spec.get("hold_reason") else ""
-        print(f"  {spec['column']:<18} {spec['title']}{held}")
+        code = f" [{len(spec['code']) + 2} code links]" if "code" in spec else ""
+        print(f"  {spec['column']:<18} {spec['title']}{held}{code}")
 
     print(f"\n{len(CARDS)} cards seeded. Board: {base_url}/api/boards/{board_id}/cards")
 
@@ -461,10 +536,19 @@ def purge(base_url: str, board_name: str) -> None:
                 for card in column.get("cards") or []]
     card_ids += [card["placement"]["card_id"] for card in view.get("orphans") or []]
 
+    # Links first. A hard card delete purges the noteboard item and drops every
+    # placement, but it does NOT drop the card's links — they stay readable,
+    # pointing at a card that no longer exists, and the reverse lookup keeps
+    # returning them with a null item. Re-running this script would pile up a
+    # fresh set every time.
+    links_removed = 0
     for card_id in card_ids:
+        for link in request(base_url, "GET", f"/api/cards/{card_id}/links") or []:
+            request(base_url, "DELETE", f"/api/links/{link['id']}")
+            links_removed += 1
         request(base_url, "DELETE", f"/api/cards/{card_id}?hard=true")
     request(base_url, "DELETE", f"/api/boards/{board_id}")
-    print(f'purged {len(card_ids)} cards and the board "{board_name}"')
+    print(f'purged {len(card_ids)} cards, {links_removed} links, and the board "{board_name}"')
 
 
 def main() -> int:
@@ -474,6 +558,8 @@ def main() -> int:
                         help=f"kanban-store base URL (default {DEFAULT_KANBAN_URL})")
     parser.add_argument("--board-name", default=DEFAULT_BOARD_NAME,
                         help=f"board to create or purge (default {DEFAULT_BOARD_NAME!r})")
+    parser.add_argument("--repo-path", default=os.path.expanduser("~/repos/northwind-api"),
+                        help="filesystem path the 'repo' links point at")
     parser.add_argument("--purge", action="store_true",
                         help="hard-delete the board's cards and the board itself, then exit")
     args = parser.parse_args()
@@ -482,7 +568,7 @@ def main() -> int:
         if args.purge:
             purge(args.kanban_url, args.board_name)
         else:
-            seed(args.kanban_url, args.board_name)
+            seed(args.kanban_url, args.board_name, args.repo_path)
     except ApiError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
