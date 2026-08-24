@@ -127,6 +127,12 @@ def commit(sha: str, label: str) -> tuple[str, str, str]:
 # An event entry is (hours_ago, kind, actor, summary) with an optional fifth
 # element forcing the clock state; a note entry is ("note", hours_ago, kind,
 # actor, body).
+#
+# No card writes an arrival or a `waiting_ended`. Both come from the mail: an
+# `email` link IS the arrival, and a reply landing IS the ball coming back.
+# Writing either by hand beside the message that already says it counted one
+# handover twice, and turned the card that met its limit into one that missed
+# it by four times over.
 CARDS = [
     {
         "title": "Add cursor-based pagination to /v1/search",
@@ -150,7 +156,6 @@ CARDS = [
              "Draft PR #1."),
             (116.5, "agent_finished", "claude-code", "PR #1 opened, CI green"),
             (116, "waiting_started", "vlad", "Sent for review to the mobile team"),
-            (50, "waiting_ended", "dinesh.okonkwo@northwind-eng.example", "Review approved"),
             ("note", 49, "status", "vlad", "Merged and deployed to staging behind the flag."),
             (48.5, "card_moved", "vlad", "Moved to Action completed", "stopped"),
             (48, "card_completed", "vlad", "Shipped in the 2026-08-22 release"),
@@ -305,8 +310,6 @@ CARDS = [
             ("note", 25.5, "status", "vlad",
              "Timeline looks right. I want customer-impact numbers in it before we circulate."),
             (25, "waiting_started", "vlad", "Waiting on the data team for the refund counts"),
-            (6, "waiting_ended", "data-team@northwind-eng.example",
-             "Numbers arrived: 812 failed checkouts, 61 refunds"),
             (5, "agent_dispatched", "vlad", "Handed to claude-code: fold the impact numbers into the review"),
             (4, "agent_finished", "claude-code", "Draft ready for review"),
             ("note", 3.5, "status", "vlad", "Reading it through once more before it goes out."),
@@ -482,14 +485,21 @@ def seed(base_url: str, board_name: str, repo_path: str, corpus_path: str) -> No
         #
         # Only the first records an event. The other two are bookkeeping, and
         # kanban-store refuses occurred_at on them rather than pretending.
+        # A card whose column stops the clock is a bucket: its mail is filed,
+        # not worked. Saying so on the link is what keeps a No-action card from
+        # reporting the largest budget figure on the board.
+        arrival_clock = "stopped" if spec["column"] == "No action" else None
+
         for message in mail_for(spec):
-            occurred = stamp(now, message["hours_ago"])
-            request(base_url, "POST", f"/api/cards/{card_id}/links", {
+            link = {
                 "entity_type": "email",
                 "entity_ref": message["locator"],
                 "label": message["subject"],
-                "occurred_at": occurred,
-            })
+                "occurred_at": stamp(now, message["hours_ago"]),
+            }
+            if arrival_clock:
+                link["clock_state"] = arrival_clock
+            request(base_url, "POST", f"/api/cards/{card_id}/links", link)
             request(base_url, "POST", f"/api/cards/{card_id}/links", {
                 "entity_type": "email_msgid",
                 "entity_ref": message["message_id"],
