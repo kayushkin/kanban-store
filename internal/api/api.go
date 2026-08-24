@@ -751,12 +751,19 @@ func (a *API) cardLinks(w http.ResponseWriter, r *http.Request, cardID string) {
 		// to the card, so they join its timeline. Every other kind of link is a fact
 		// about the card rather than an event, and is not logged.
 		kind, state, isAction := clockStateForEntityLink(req.EntityType)
-		if req.OccurredAt != nil && !isAction {
+		if req.ClockState != "" {
+			if !model.ValidClockState(req.ClockState) {
+				writeError(w, 400, "clock_state must be one of: "+strings.Join(model.ClockStateNames(), ", "))
+				return
+			}
+			state = req.ClockState
+		}
+		if (req.OccurredAt != nil || req.ClockState != "") && !isAction {
 			// Refused rather than ignored. A caller that backdates a repo link has
 			// misunderstood what the link is, and answering 201 would let it believe
 			// it had moved something on the timeline.
 			writeError(w, 400, fmt.Sprintf(
-				"occurred_at is only meaningful for a link that records an action; %q records a fact about the card and is never logged",
+				"occurred_at and clock_state are only meaningful for a link that records an action; %q records a fact about the card and is never logged",
 				req.EntityType))
 			return
 		}

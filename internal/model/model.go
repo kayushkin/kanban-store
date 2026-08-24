@@ -225,6 +225,16 @@ type CreateCardLinkRequest struct {
 	// a no-op — see the handler. Silently ignoring it would let a caller believe
 	// it had backdated something it had not.
 	OccurredAt *time.Time `json:"occurred_at,omitempty"`
+	// ClockState overrides what the arrival means for the budget clock.
+	//
+	// The link type already implies one — mail arriving is work landing in front
+	// of you, so it runs the clock. That is right for a card someone works, and
+	// wrong for a bucket: a hundred build digests filed on one No-action card
+	// are not a hundred arrivals of work, and letting them run the clock reports
+	// a card nobody has ever touched as having consumed weeks of budget.
+	//
+	// Like OccurredAt, it is refused on a link type that records no action.
+	ClockState ClockState `json:"clock_state,omitempty"`
 }
 
 func (r *CreateCardLinkRequest) Validate() error {

@@ -2,12 +2,20 @@
 """Seed a board of synthetic software-team work emails, for exercising the
 email classifier and the card action timeline.
 
-The mail is fiction. Nothing in it came from a real mailbox, no message it
-links to exists in mailstack, and the addresses are all under .example. The
-point is to give the timeline something to draw: cards that ran over their
+The mail is synthetic but it is REAL mail: every message lives in the
+`demo-work` account in mailstack, written by `synthetic-mail` in the scheduler
+repo, and a card's email links open it inline in the card drawer. The addresses
+are all under .example, which RFC 2606 reserves so test data cannot reach
+anybody.
+
+The point is to give the timeline something to draw: cards that ran over their
 limit and cards that met it, long stretches of waiting on somebody else, agent
 dispatches, coding updates, notes a person wrote, deadlines already missed and
 deadlines still ahead.
+
+This script does not invent arrival events. Creating an `email` link IS the
+arrival as far as kanban-store is concerned, and the link carries `occurred_at`,
+so the timeline says when the mail was sent rather than when it was filed.
 
 The board carries the same four columns and the same priority ladder as the
 live "Email" board, so email-classifier can be pointed at it as a sandbox:
@@ -132,11 +140,7 @@ CARDS = [
             "Keep the offset parameter behind a flag for one release so the old "
             "clients do not break."
         ),
-        "sender": "priya.raman@northwind-eng.example",
-        "messages": ["1a4f2c19", "1a4f7b30"],
         "events": [
-            (120, "email_received", "priya.raman@northwind-eng.example",
-             "Can you do this task: replace offset paging on /v1/search before the mobile release?"),
             ("note", 119.5, "status", "vlad",
              "Confirmed the scope with Priya: cursor paging, offset stays behind a flag for one release."),
             (119, "agent_dispatched", "vlad",
@@ -169,11 +173,7 @@ CARDS = [
             "Payment captured on ORD-48812, no fulfilment event ever arrived.\n\n"
             "Customer ops wants a status answer today."
         ),
-        "sender": "ops@northwind-support.example",
-        "messages": ["2b8e0447"],
         "events": [
-            (26, "email_received", "ops@northwind-support.example",
-             "Can you check the status of order ORD-48812? Payment captured, no fulfilment event."),
             ("note", 25.5, "status", "vlad",
              "Traced the webhook: 3 delivery attempts, all 502 from the fulfilment vendor. "
              "The order row itself is consistent."),
@@ -195,11 +195,7 @@ CARDS = [
             "Platform decided to stay on managed Redis this quarter, so the spike "
             "stops here.\n\nKeep the benchmark harness — it is the reusable part."
         ),
-        "sender": "marcus.feld@northwind-eng.example",
-        "messages": ["3c1d9950"],
         "events": [
-            (72, "email_received", "marcus.feld@northwind-eng.example",
-             "Cancel the Valkey spike — we are staying on managed Redis for this quarter."),
             ("note", 71.8, "status", "vlad",
              "Spike was two days in. Stopping now and keeping the benchmark harness."),
             (71.5, "agent_dispatched", "vlad",
@@ -226,18 +222,12 @@ CARDS = [
             "a follow-up email added group sync on top of that.\n\n"
             "Deprovisioning is still unhandled and nobody has scoped it."
         ),
-        "sender": "priya.raman@northwind-eng.example",
-        "messages": ["4d7a1188", "4d7a2291"],
         "events": [
-            (8, "email_received", "priya.raman@northwind-eng.example",
-             "Can you update the SSO rollout task to include SCIM user provisioning for Okta?"),
             ("note", 7.5, "status", "vlad",
              "Scope grew: SCIM is its own API surface, not a flag on the existing one. Re-estimating."),
             (7, "agent_dispatched", "vlad",
              "Handed to claude-code: scaffold the SCIM /Users endpoint behind a feature flag"),
             (5, "agent_finished", "claude-code", "Scaffold plus tests, PR #2 (draft)"),
-            (4, "email_received", "priya.raman@northwind-eng.example",
-             "Follow-up: include group sync in the same rollout."),
             ("note", 3.5, "coding-update", "claude-code",
              "Group sync folded into the same PR. Deprovisioning is still unhandled — it needs a decision "
              "on what happens to orphaned sessions."),
@@ -260,15 +250,7 @@ CARDS = [
             "This is the shape bulk mail takes on a classifier board: the sender "
             "affinity routes it with no model call at all."
         ),
-        "sender": "ci-bot@northwind-eng.example",
-        "messages": ["5e2b7001", "5e2b7002", "5e2b7003"],
         "events": [
-            (72, "email_received", "ci-bot@northwind-eng.example",
-             "Nightly build main@a91c4f — 412 passed, 0 failed", "stopped"),
-            (48, "email_received", "ci-bot@northwind-eng.example",
-             "Nightly build main@c30d81 — 412 passed, 0 failed", "stopped"),
-            (24, "email_received", "ci-bot@northwind-eng.example",
-             "Nightly build main@f7b219 — 411 passed, 1 flaky (checkout_e2e)", "stopped"),
         ],
     },
     {
@@ -282,11 +264,7 @@ CARDS = [
             "1 Sep audit.\n\nRotation restarts the app, so it waits for the Thursday "
             "maintenance window."
         ),
-        "sender": "security@northwind-eng.example",
-        "messages": ["6f3c5512"],
         "events": [
-            (30, "email_received", "security@northwind-eng.example",
-             "Rotate the staging Postgres credentials before the 1 Sep audit."),
             ("note", 29, "status", "vlad",
              "Rotation needs the app restarted, so this goes in the Thursday window."),
             (28.5, "waiting_started", "vlad",
@@ -307,11 +285,7 @@ CARDS = [
             "than vanishing.\n\nAn unfiled email is a classifier failure, and this "
             "card sits in Action needed precisely so it is visible."
         ),
-        "sender": "no-reply@vendor-portal.example",
-        "messages": ["7a9d0033"],
         "events": [
-            (6, "email_received", "no-reply@vendor-portal.example",
-             "Re: Fwd: (no subject) — model returned no card for this message"),
         ],
     },
     {
@@ -324,11 +298,7 @@ CARDS = [
             "Checkout was down 14:02–14:37. The review needs a timeline, the "
             "customer-impact numbers and the follow-up actions, circulated by Friday."
         ),
-        "sender": "helena.vos@northwind-eng.example",
-        "messages": ["8b4e6120"],
         "events": [
-            (28, "email_received", "helena.vos@northwind-eng.example",
-             "We need the incident review for the 14:02 checkout outage by Friday."),
             (27, "agent_dispatched", "vlad",
              "Handed to claude-code: assemble the outage timeline from logstack"),
             (26, "agent_finished", "claude-code", "Timeline drafted from 4 log sources"),
@@ -349,11 +319,7 @@ CARDS = [
         "due_hours": 14 * 24,
         "tags": ["cat:engineering", "action:task", "urgency:low", "work:not-started"],
         "body": "Background chore. The build image is still on Node 20; 22 is LTS now.",
-        "sender": "marcus.feld@northwind-eng.example",
-        "messages": ["9c5f8844"],
         "events": [
-            (100, "email_received", "marcus.feld@northwind-eng.example",
-             "Low priority: bump the build image to Node 22 LTS when there is a gap."),
             ("note", 99, "status", "vlad", "Queued behind the SSO work."),
         ],
         # Repo but no PR: nobody has started, which is a shape worth having on
@@ -362,10 +328,66 @@ CARDS = [
     },
 ]
 
-# The fictional mailstack account these messages would live in. The email link
-# ref is account-qualified because an IMAP ref is a bare UID, unique only
-# within one mailbox.
-MAIL_ACCOUNT = "seed-work"
+# Where the generated mail lives. Written by `synthetic-mail -generate` in the
+# scheduler repo and appended to mailstack by `synthetic-mail -append`; this
+# script only reads it, and only to learn which message belongs on which card.
+DEFAULT_CORPUS_PATH = os.path.expanduser(
+    "~/repos/scheduler/cmd/synthetic-mail/corpus.json")
+
+# Mail about no work item at all still has to land somewhere — that is the whole
+# point of a bucket card. A classifier that could only file mail it recognized
+# would leave the rest in a pile nobody owns.
+NOISE_ROUTING = {
+    "bulk_notification": "Nightly CI digest — main",
+    "unfiled": "Unfiled email — needs triage",
+}
+
+# Filled by load_mail_corpus: card title -> the messages that belong on it.
+#
+# Keyed by TITLE and not by card id, deliberately. Card ids are minted fresh
+# every time this board is re-seeded, so an id in the corpus would be dead on
+# the next run. The title is a key within the fixture, which owns both sides of
+# it — not a name-join against another store.
+CORPUS_BY_CARD: dict[str, list[dict]] = {}
+
+
+def load_mail_corpus(path: str) -> int:
+    """Read the generated mail and route each message to the card it concerns."""
+    with open(path) as f:
+        corpus = json.load(f)
+
+    known_titles = {card["title"] for card in CARDS}
+    routed = 0
+    for message in corpus["messages"]:
+        if not message.get("locator"):
+            raise ApiError(
+                f"message {message['key']} has no locator, so it was never appended "
+                f"to mailstack. Run: synthetic-mail -append")
+
+        title = message.get("work_item") or NOISE_ROUTING.get(message["kind"])
+        if not title:
+            raise ApiError(
+                f"message {message['key']} is a {message['kind']} about no work item, "
+                f"and NOISE_ROUTING says nothing about where that kind belongs")
+        if title not in known_titles:
+            # The corpus was generated from a board whose cards have since been
+            # renamed. Refuse rather than silently dropping the mail: a card
+            # with no email is exactly what this seed exists to prevent.
+            raise ApiError(
+                f"message {message['key']} belongs on a card titled {title!r}, "
+                f"which is not on this board. Regenerate the corpus.")
+
+        CORPUS_BY_CARD.setdefault(title, []).append(message)
+        routed += 1
+
+    for messages in CORPUS_BY_CARD.values():
+        messages.sort(key=lambda m: -m["hours_ago"])
+    return routed
+
+
+def mail_for(spec: dict) -> list[dict]:
+    """The generated messages that belong on this card, oldest first."""
+    return CORPUS_BY_CARD.get(spec["title"], [])
 
 
 class ApiError(RuntimeError):
@@ -403,12 +425,15 @@ def stamp(now: datetime, hours_ago: float) -> str:
     return (now - timedelta(hours=hours_ago)).isoformat().replace("+00:00", "Z")
 
 
-def seed(base_url: str, board_name: str, repo_path: str) -> None:
+def seed(base_url: str, board_name: str, repo_path: str, corpus_path: str) -> None:
     if find_board(base_url, board_name) is not None:
         raise ApiError(
             f'a board named "{board_name}" already exists. '
             f"Run with --purge first, or pass --board-name to seed a second one."
         )
+
+    routed = load_mail_corpus(corpus_path)
+    print(f"read {routed} generated message(s) from {corpus_path}")
 
     now = datetime.now(timezone.utc)
 
@@ -441,28 +466,39 @@ def seed(base_url: str, board_name: str, repo_path: str) -> None:
         card = request(base_url, "POST", f"/api/boards/{board_id}/cards", create)
         card_id = card["placement"]["card_id"]
 
-        # Links. The Message-ID is what dedups one mail that reached two
-        # accounts and what rebuilds a thread; the sender is the affinity the
-        # classifier learns to route bulk mail by without calling a model.
+        # Links to the real mail. Three entity types, doing three jobs:
         #
-        # There is deliberately no 'email' locator link. kanban-store treats one
-        # as an arrival and records an email_received event for it — stamped
-        # now, because a link carries no occurred_at. On seeded cards that
-        # duplicates the backdated arrival below and leaves every finished card
-        # reporting a running clock. The locator these messages would have had
-        # rides along in the arrival event's detail instead, where it is
-        # readable and inert. Nothing is lost: the messages are fiction, so a
-        # locator link could never resolve in mailstack anyway.
-        for message_id in spec["messages"]:
+        #   email        — the locator mailstack resolves, "account:message_id".
+        #                  This is the one the card drawer expands inline, and
+        #                  the one kanban-store reads as an ARRIVAL: creating it
+        #                  records the email_received event on the timeline.
+        #                  occurred_at backdates that to when the mail was sent,
+        #                  which is why this seed no longer invents arrival
+        #                  events of its own — the link is the arrival.
+        #   email_msgid  — the RFC 5322 identity, for cross-account dedup and
+        #                  for rebuilding a thread.
+        #   email_sender — the affinity the classifier learns to route bulk mail
+        #                  by without calling a model at all.
+        #
+        # Only the first records an event. The other two are bookkeeping, and
+        # kanban-store refuses occurred_at on them rather than pretending.
+        for message in mail_for(spec):
+            occurred = stamp(now, message["hours_ago"])
+            request(base_url, "POST", f"/api/cards/{card_id}/links", {
+                "entity_type": "email",
+                "entity_ref": message["locator"],
+                "label": message["subject"],
+                "occurred_at": occurred,
+            })
             request(base_url, "POST", f"/api/cards/{card_id}/links", {
                 "entity_type": "email_msgid",
-                "entity_ref": f"{message_id}@mail.northwind-eng.example",
-                "label": spec["title"],
+                "entity_ref": message["message_id"],
+                "label": message["subject"],
             })
-        request(base_url, "POST", f"/api/cards/{card_id}/links", {
-            "entity_type": "email_sender",
-            "entity_ref": spec["sender"],
-        })
+            request(base_url, "POST", f"/api/cards/{card_id}/links", {
+                "entity_type": "email_sender",
+                "entity_ref": message["from"]["email"],
+            })
 
         # The code the card produced. A card that touched the repo at all links
         # to it both ways — the path an agent would cd into, and the URL a human
@@ -482,7 +518,6 @@ def seed(base_url: str, board_name: str, repo_path: str) -> None:
                     "entity_type": entity_type, "entity_ref": entity_ref, "label": label,
                 })
 
-        arrivals = iter(spec["messages"])
         for entry in spec["events"]:
             if entry[0] == "note":
                 _, hours_ago, kind, actor, body = entry
@@ -496,17 +531,7 @@ def seed(base_url: str, board_name: str, repo_path: str) -> None:
                 "kind": kind, "actor": actor, "summary": summary,
                 "occurred_at": stamp(now, hours_ago),
             }
-            # An email arriving concerns the card wherever it sits, so it is
-            # recorded card-wide. Everything else happened on this board.
-            if kind == "email_received":
-                message_id = next(arrivals, spec["messages"][-1])
-                event["detail"] = {
-                    "locator": f"{MAIL_ACCOUNT}:{message_id}",
-                    "message_id": f"{message_id}@mail.northwind-eng.example",
-                    "from": actor,
-                }
-            else:
-                event["board_id"] = board_id
+            event["board_id"] = board_id
             # card_moved has no default clock state — a move means whatever its
             # destination column means — and a No-action bucket stops the clock
             # on arrival rather than starting it.
@@ -519,7 +544,8 @@ def seed(base_url: str, board_name: str, repo_path: str) -> None:
 
         held = " (held)" if spec.get("hold_reason") else ""
         code = f" [{len(spec['code']) + 2} code links]" if "code" in spec else ""
-        print(f"  {spec['column']:<18} {spec['title']}{held}{code}")
+        mail = f" [{len(mail_for(spec))} emails]" if mail_for(spec) else ""
+        print(f"  {spec['column']:<18} {spec['title']}{held}{mail}{code}")
 
     print(f"\n{len(CARDS)} cards seeded. Board: {base_url}/api/boards/{board_id}/cards")
 
@@ -560,6 +586,8 @@ def main() -> int:
                         help=f"board to create or purge (default {DEFAULT_BOARD_NAME!r})")
     parser.add_argument("--repo-path", default=os.path.expanduser("~/repos/northwind-api"),
                         help="filesystem path the 'repo' links point at")
+    parser.add_argument("--corpus", default=DEFAULT_CORPUS_PATH,
+                        help="the generated mail corpus, written by synthetic-mail")
     parser.add_argument("--purge", action="store_true",
                         help="hard-delete the board's cards and the board itself, then exit")
     args = parser.parse_args()
@@ -568,7 +596,7 @@ def main() -> int:
         if args.purge:
             purge(args.kanban_url, args.board_name)
         else:
-            seed(args.kanban_url, args.board_name, args.repo_path)
+            seed(args.kanban_url, args.board_name, args.repo_path, args.corpus)
     except ApiError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

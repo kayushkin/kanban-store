@@ -755,3 +755,86 @@ func TestALinkWithoutOccurredAtStillStampsNow(t *testing.T) {
 		}
 	}
 }
+
+// A bucket card is the reason clock_state exists on a link. Mail arriving means
+// work landed in front of you — on a card someone works. A hundred build
+// digests filed on one No-action card are not a hundred arrivals of work, and
+// letting them run the clock reports a card nobody has touched as having
+// consumed weeks of budget.
+func TestAnArrivalCanBeFiledWithoutStartingTheClock(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	arrived := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
+	w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "email",
+		EntityRef:  "demo-work:lm-digest",
+		OccurredAt: &arrived,
+		ClockState: model.ClockStopped,
+	})
+	if w.Code != 201 {
+		t.Fatalf("status %d, want 201: %s", w.Code, w.Body)
+	}
+
+	var events []model.CardEvent
+	w = do(t, h, "GET", "/api/cards/"+cardID+"/events", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	for _, e := range events {
+		if e.Kind == model.EventEmailReceived {
+			if e.ClockState != model.ClockStopped {
+				t.Fatalf("arrival clock state %q, want stopped", e.ClockState)
+			}
+			return
+		}
+	}
+	t.Fatal("no email_received event recorded")
+}
+
+func TestAnArrivalStillRunsTheClockByDefault(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	if w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "email", EntityRef: "demo-work:lm-work",
+	}); w.Code != 201 {
+		t.Fatalf("status %d, want 201: %s", w.Code, w.Body)
+	}
+	var events []model.CardEvent
+	w := do(t, h, "GET", "/api/cards/"+cardID+"/events", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	for _, e := range events {
+		if e.Kind == model.EventEmailReceived && e.ClockState != model.ClockRunning {
+			t.Fatalf("arrival clock state %q, want running by default", e.ClockState)
+		}
+	}
+}
+
+func TestAnUnknownClockStateOnALinkIsRefused(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	if w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "email", EntityRef: "demo-work:lm-bad", ClockState: model.ClockState("dawdling"),
+	}); w.Code != 400 {
+		t.Fatalf("status %d, want 400", w.Code)
+	}
+}
+
+func TestClockStateOnAFactLinkIsRefused(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	cardID := linkTestCard(t, h)
+
+	if w := do(t, h, "POST", "/api/cards/"+cardID+"/links", model.CreateCardLinkRequest{
+		EntityType: "repo", EntityRef: "/tmp/x", ClockState: model.ClockStopped,
+	}); w.Code != 400 {
+		t.Fatalf("status %d, want 400", w.Code)
+	}
+}

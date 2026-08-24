@@ -171,7 +171,7 @@ without `parent_id` escapes both.
 | `GET` | `/api/cards/{id}/timeline` | `?board_id=` — every action in order, with the time between them and the totals |
 | `DELETE` | `/api/notes/{noteID}` | Removes the note's text; its `note_added` event stays |
 | `GET` `PUT` | `/api/boards/{id}/priority-levels` | The board's priority ladder |
-| `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…,"occurred_at":…}` |
+| `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…,"occurred_at":…,"clock_state":…}` |
 | `DELETE` | `/api/links/{linkID}` | |
 | `GET` | `/api/entities/{type}/{ref}/cards` | Reverse lookup: every card linked to this entity, oldest link first |
 
@@ -269,7 +269,14 @@ It does **not** move the link's own `created_at`. When the link was recorded and
 when the thing happened are two different facts, and events here already keep
 them apart as `recorded_at` and `occurred_at`.
 
-Sending `occurred_at` with a link type that records no action is a **400**, not a
+`clock_state` overrides what the arrival means for the clock. The link type
+already implies one — mail arriving is work landing in front of you, so it runs
+the clock — and that is right for a card someone works and wrong for a bucket.
+A hundred build digests filed on one No-action card are not a hundred arrivals
+of work, and letting them run the clock reports a card nobody has ever touched
+as having consumed weeks of budget.
+
+Sending either field with a link type that records no action is a **400**, not a
 no-op. Backdating a `repo` link is a caller misunderstanding what the link is,
 and answering 201 would let it believe it had moved something on a timeline it
 never touched.
