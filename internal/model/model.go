@@ -297,6 +297,17 @@ type EntityTypeInfo struct {
 	Type    string `json:"type"`
 	Service string `json:"service,omitempty"`
 	Search  string `json:"search,omitempty"`
+	// Get is the owning service's fetch-one-by-id route, relative to the
+	// service root, with "{id}" marking where the id goes (e.g.
+	// "/api/items/{id}"). Empty means the service has no by-id lookup for this
+	// type, so a reference resolver cannot probe it.
+	Get string `json:"get,omitempty"`
+	// IDPatterns are case-insensitive regular expressions describing what this
+	// type's ids look like, matched against the WHOLE candidate id (resolvers
+	// anchor them). A reference resolver probes an id against every type whose
+	// pattern matches. Empty means ids of this type have no recognizable shape
+	// and are never probed.
+	IDPatterns []string `json:"id_patterns,omitempty"`
 }
 
 type TagCount struct {

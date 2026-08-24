@@ -6,11 +6,32 @@ package config
 
 import "github.com/kayushkin/kanban-store/internal/model"
 
+// UUIDPattern matches the canonical 8-4-4-4-12 hex form, the id shape
+// noteboard hands out. Resolvers anchor it and match case-insensitively.
+const UUIDPattern = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+
 // EntityTypes is the canonical registry. Add new types here as needed.
 // Empty Service/Search means kanban knows about the type but there is no
 // upstream service to autocomplete against (e.g. git_repo URLs).
+//
+// Get + IDPatterns power reference resolution (dash's POST /api/resolve): a
+// resolver takes an id found in prose, collects every type whose pattern
+// matches it, and probes each type's Get route to learn what the id actually
+// names. Adding a resolvable type is therefore one row here — no resolver or
+// frontend change. Rows without Get (skill and tool ids are small integers,
+// email refs are compound strings) stay search-only.
 var EntityTypes = []model.EntityTypeInfo{
-	{Type: "session", Service: "llm-bridge-server", Search: "/api/sessions?q="},
+	{
+		Type: "session", Service: "llm-bridge-server", Search: "/api/sessions?q=",
+		Get: "/sessions/{id}",
+		// Bridge session ids are self-identifying: a snowflake with a br_
+		// prefix, or a herald-/autoworker- name ending in one. Harness session
+		// uuids are NOT listed — llm-bridge-server cannot fetch by them.
+		IDPatterns: []string{
+			`br_\d{16,19}`,
+			`(?:herald|autoworker)(?:-[a-z0-9]+)*-\d{16,19}`,
+		},
+	},
 	{Type: "instance", Service: "llm-bridge-server", Search: "/api/instances?q="},
 	{Type: "machine", Service: "healthcheck", Search: "/api/services?q="},
 	{Type: "service", Service: "healthcheck", Search: "/api/services?q="},
@@ -19,7 +40,14 @@ var EntityTypes = []model.EntityTypeInfo{
 	{Type: "repo"},     // local filesystem path; no upstream
 	{Type: "git_repo"}, // remote URL; no upstream
 	{Type: "agent", Service: "agent-store", Search: "/api/agents?q="},
-	{Type: "note", Service: "noteboard", Search: "/api/items?q="},
+	{
+		Type: "note", Service: "noteboard", Search: "/api/items?q=",
+		Get: "/api/items/{id}",
+		// One id space for every noteboard item type (note, todo, rank,
+		// workspace); the fetched item's own `type` field is the authority on
+		// which it is.
+		IDPatterns: []string{UUIDPattern},
+	},
 
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
