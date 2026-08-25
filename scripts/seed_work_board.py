@@ -124,6 +124,11 @@ def commit(sha: str, label: str) -> tuple[str, str, str]:
 # happened to it. Hours are counted back from the moment the seed runs, so a
 # freshly seeded board always reads as though the work happened this week.
 #
+# Action tags use the CLASSIFIER's work vocabulary, not a set of their own.
+# The promoter picks cards up by action, so a seed writing action:task while the
+# classifier writes action:implement produces a board where nothing is ever
+# eligible and nothing says why.
+#
 # An event entry is (hours_ago, kind, actor, summary) with an optional fifth
 # element forcing the clock state; a note entry is ("note", hours_ago, kind,
 # actor, body).
@@ -139,7 +144,7 @@ CARDS = [
         "column": "Action completed",
         "priority": 4,
         "due_hours": -48,
-        "tags": ["cat:engineering", "action:task", "urgency:normal", "work:done"],
+        "tags": ["cat:engineering", "action:implement", "urgency:normal", "work:done"],
         "body": (
             "Offset paging on `/v1/search` falls apart past page 40 and the mobile "
             "release needs stable cursors.\n\n"
@@ -195,7 +200,7 @@ CARDS = [
         "column": "Action completed",
         "priority": 3,
         "due_hours": None,
-        "tags": ["cat:engineering", "action:cancel", "urgency:normal", "work:done"],
+        "tags": ["cat:engineering", "action:decide", "urgency:normal", "work:done"],
         "body": (
             "Platform decided to stay on managed Redis this quarter, so the spike "
             "stops here.\n\nKeep the benchmark harness — it is the reusable part."
@@ -221,7 +226,7 @@ CARDS = [
         "column": "Action needed",
         "priority": 5,
         "due_hours": -12,
-        "tags": ["cat:engineering", "action:task", "urgency:high", "work:in-progress"],
+        "tags": ["cat:engineering", "action:implement", "urgency:high", "work:in-progress"],
         "body": (
             "The SSO rollout now has to cover SCIM user provisioning for Okta, and "
             "a follow-up email added group sync on top of that.\n\n"
@@ -263,7 +268,7 @@ CARDS = [
         "column": "Action needed",
         "priority": 4,
         "due_hours": 7 * 24,
-        "tags": ["cat:security", "action:task", "urgency:normal", "work:not-started"],
+        "tags": ["cat:security", "action:implement", "urgency:normal", "work:not-started"],
         "body": (
             "Security wants the staging Postgres credentials rotated ahead of the "
             "1 Sep audit.\n\nRotation restarts the app, so it waits for the Thursday "
@@ -284,7 +289,7 @@ CARDS = [
         "column": "Action needed",
         "priority": None,
         "due_hours": None,
-        "tags": ["cat:unknown", "action:triage", "urgency:normal", "work:not-started"],
+        "tags": ["cat:unknown", "action:read", "urgency:normal", "work:not-started"],
         "body": (
             "The model returned no card for this message, so it lands here rather "
             "than vanishing.\n\nAn unfiled email is a classifier failure, and this "
@@ -298,7 +303,7 @@ CARDS = [
         "column": "Action needed",
         "priority": 4,
         "due_hours": 6,
-        "tags": ["cat:engineering", "action:write", "urgency:high", "work:in-progress"],
+        "tags": ["cat:engineering", "action:document", "urgency:high", "work:in-progress"],
         "body": (
             "Checkout was down 14:02–14:37. The review needs a timeline, the "
             "customer-impact numbers and the follow-up actions, circulated by Friday."
@@ -320,7 +325,7 @@ CARDS = [
         "column": "Action needed",
         "priority": 2,
         "due_hours": 14 * 24,
-        "tags": ["cat:engineering", "action:task", "urgency:low", "work:not-started"],
+        "tags": ["cat:engineering", "action:implement", "urgency:low", "work:not-started"],
         "body": "Background chore. The build image is still on Node 20; 22 is LTS now.",
         "events": [
             ("note", 99, "status", "vlad", "Queued behind the SSO work."),
