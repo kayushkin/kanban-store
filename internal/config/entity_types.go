@@ -49,6 +49,16 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{UUIDPattern},
 	},
 
+	{
+		Type: "prediction", Service: "prediction-store", Search: "/predictions?q=",
+		Get: "/predictions/{id}",
+		// Self-identifying by design: prediction-store mints prediction_000042
+		// rather than a uuid precisely so this pattern can exist without
+		// colliding with note's uuid claim above — a bare-uuid pattern here
+		// would make every uuid in every chat message probe that store too.
+		IDPatterns: []string{`prediction_\d{6,}`},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
