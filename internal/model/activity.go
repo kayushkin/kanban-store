@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 // ============================ The budget clock ============================
@@ -170,7 +172,7 @@ func (r *CreateCardEventRequest) ResolveClockState() (ClockState, error) {
 	if s, ok := DefaultClockStateForEventKind(r.Kind); ok {
 		return s, nil
 	}
-	return "", fmt.Errorf("kind %q has no default clock state, so clock_state is required", r.Kind)
+	return "", fmt.Errorf("kind %q has no default clock state, so clock_state is required", boundedtext.Value(string(r.Kind)))
 }
 
 func (r *CreateCardEventRequest) Validate() error {
@@ -310,11 +312,11 @@ func (r *SetPriorityLadderRequest) Validate() error {
 			return fmt.Errorf("label is required for priority_value %d", lv.PriorityValue)
 		}
 		if seenLabel[lv.Label] {
-			return fmt.Errorf("duplicate label %q", lv.Label)
+			return fmt.Errorf("duplicate label %q", boundedtext.Value(lv.Label))
 		}
 		seenLabel[lv.Label] = true
 		if lv.BudgetSeconds != nil && *lv.BudgetSeconds <= 0 {
-			return fmt.Errorf("budget_seconds must be positive for %q; omit it for a level with no limit", lv.Label)
+			return fmt.Errorf("budget_seconds must be positive for %q; omit it for a level with no limit", boundedtext.Value(lv.Label))
 		}
 		if lv.DefaultAutoHoldAtUSD != nil && (*lv.DefaultAutoHoldAtUSD < 0 || math.IsInf(*lv.DefaultAutoHoldAtUSD, 0) || math.IsNaN(*lv.DefaultAutoHoldAtUSD)) {
 			return fmt.Errorf("default_auto_hold_at_usd must be zero or more dollars for %q; omit it for a level with no default", lv.Label)
@@ -358,15 +360,15 @@ func (b *BusinessHours) WeekdaySet() map[time.Weekday]struct{} {
 func ParseClockTime(v string) (int, error) {
 	parts := strings.Split(v, ":")
 	if len(parts) != 2 {
-		return 0, fmt.Errorf("time %q must be HH:MM", v)
+		return 0, fmt.Errorf("time %q must be HH:MM", boundedtext.Value(v))
 	}
 	h, err := strconv.Atoi(parts[0])
 	if err != nil || h < 0 || h > 23 {
-		return 0, fmt.Errorf("hour in %q must be 00-23", v)
+		return 0, fmt.Errorf("hour in %q must be 00-23", boundedtext.Value(v))
 	}
 	m, err := strconv.Atoi(parts[1])
 	if err != nil || m < 0 || m > 59 {
-		return 0, fmt.Errorf("minute in %q must be 00-59", v)
+		return 0, fmt.Errorf("minute in %q must be 00-59", boundedtext.Value(v))
 	}
 	return h*60 + m, nil
 }
@@ -379,14 +381,14 @@ func (b *BusinessHours) Validate() error {
 		return fmt.Errorf("tzid is required: business hours without a zone drift across daylight saving")
 	}
 	if _, err := time.LoadLocation(b.TZID); err != nil {
-		return fmt.Errorf("unknown tzid %q: %w", b.TZID, err)
+		return fmt.Errorf("unknown tzid %q: %w", boundedtext.Value(b.TZID), boundedtext.Error(err))
 	}
 	if len(b.Days) == 0 {
 		return fmt.Errorf("days is required (any of MO TU WE TH FR SA SU)")
 	}
 	for _, d := range b.Days {
 		if _, ok := weekdayByCode[strings.ToUpper(strings.TrimSpace(d))]; !ok {
-			return fmt.Errorf("unknown day %q; use MO TU WE TH FR SA SU", d)
+			return fmt.Errorf("unknown day %q; use MO TU WE TH FR SA SU", boundedtext.Value(d))
 		}
 	}
 	start, err := ParseClockTime(b.Start)
