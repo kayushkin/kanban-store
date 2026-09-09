@@ -53,7 +53,10 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"autoworker-fix-tests-1787454393154542495", map[string]bool{"session": true, "note": false}},
 		{"d5e695af-8bd4-4bb2-9398-fe24774dd95f", map[string]bool{"session": false, "note": true}},
 		{"D5E695AF-8BD4-4BB2-9398-FE24774DD95F", map[string]bool{"note": true}}, // case-insensitive
-		{"br_123", map[string]bool{"session": false}},                          // snowflake too short
+		{"br_123", map[string]bool{"session": false}},                           // snowflake too short
+		{"principal_000001", map[string]bool{"principal": true, "prediction": false, "note": false}},
+		{"prediction_000001", map[string]bool{"prediction": true, "principal": false}},
+		{"principal_123", map[string]bool{"principal": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
 	}
 	for _, c := range cases {

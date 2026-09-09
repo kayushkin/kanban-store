@@ -247,6 +247,21 @@ func (r *CreateCardLinkRequest) Validate() error {
 	return nil
 }
 
+// CardAssignment says a principal is on a card. It is its own fact about the
+// card, not a card link: a link's label is a display name and its uniqueness is
+// per entity ref, and neither is what "assigned" means. PrincipalID is an id
+// minted by principal-store, which owns who a principal is; kanban-store checks
+// it exists there before writing the row and never stores the name.
+//
+// There is no role. Version one answers "who is assigned"; owner versus
+// reviewer is a later question, if it is ever asked.
+type CardAssignment struct {
+	CardID      string    `json:"card_id"`
+	PrincipalID string    `json:"principal_id"`
+	AssignedBy  string    `json:"assigned_by"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // EntityTag is cross-cutting: tag any (entity_type, entity_ref) pair without
 // involving cards or boards. Lets agents tag a session "p0" or a machine "lab".
 type EntityTag struct {
@@ -290,12 +305,13 @@ type ColumnView struct {
 }
 
 // CardView combines a placement with its noteboard item content (passed
-// through unchanged) and links. Item is `any` so we don't redefine
-// noteboard's Item shape here.
+// through unchanged), links and assignments. Item is `any` so we don't
+// redefine noteboard's Item shape here.
 type CardView struct {
-	Placement *Placement `json:"placement"`
-	Item      any        `json:"item"`
-	Links     []CardLink `json:"links,omitempty"`
+	Placement   *Placement       `json:"placement"`
+	Item        any              `json:"item"`
+	Links       []CardLink       `json:"links,omitempty"`
+	Assignments []CardAssignment `json:"assignments,omitempty"`
 	// Time is the card's clock as the board sees it: how long it has been alive,
 	// how much of that counted as workable, and how that sits against the limit
 	// its priority sets. Computed from the card's events on every read, never

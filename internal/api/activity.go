@@ -43,11 +43,61 @@ func (a *API) clockStateForColumn(cardID, boardID, columnID string) model.ClockS
 	if col, err := a.store.GetColumn(columnID); err == nil && col.BudgetClockState != nil && *col.BudgetClockState != "" {
 		return *col.BudgetClockState
 	}
-	events, err := a.store.ListCardEvents(cardID, boardID)
-	if err == nil && len(events) > 0 {
-		return events[len(events)-1].ClockState
+	if state, ok, err := a.lastRecordedClockState(cardID, boardID); err == nil && ok {
+		return state
 	}
 	return model.ClockRunning
+}
+
+// lastRecordedClockState is the state the card's most recent action left it in
+// — on one board, or anywhere when boardID is empty. ok is false when the card
+// has no history there.
+func (a *API) lastRecordedClockState(cardID, boardID string) (model.ClockState, bool, error) {
+	events, err := a.store.ListCardEvents(cardID, boardID)
+	if err != nil {
+		return "", false, err
+	}
+	if len(events) == 0 {
+		return "", false, nil
+	}
+	return events[len(events)-1].ClockState, true, nil
+}
+
+// clockStateCarriedForward is what a card-wide action that says nothing about
+// the clock records — a principal being assigned or unassigned — so that the
+// segment after it is attributed exactly as the segment before it was. In
+// order:
+//
+//  1. The state the card's most recent action left it in, on any board.
+//  2. With no history, the classification of the column the card sits in, when
+//     it sits in exactly one. Most cards on this host predate the event log —
+//     7,245 of 9,222 placed cards had no events when this was written, 6,928 of
+//     them in a stopped column — and their column is the one thing that says
+//     what state they are in. Defaulting them to running would have restarted
+//     every finished card the moment someone was assigned to it.
+//  3. Running. A card with no history that sits nowhere classified is work that
+//     exists and is not declared blocked, which is the same answer the store
+//     gives any first action on such a card.
+func (a *API) clockStateCarriedForward(cardID string) (model.ClockState, error) {
+	if state, ok, err := a.lastRecordedClockState(cardID, ""); err != nil {
+		return "", err
+	} else if ok {
+		return state, nil
+	}
+	placements, err := a.store.ListPlacementsByCard(cardID)
+	if err != nil {
+		return "", err
+	}
+	if len(placements) == 1 {
+		col, err := a.store.GetColumn(placements[0].ColumnID)
+		if err != nil {
+			return "", err
+		}
+		if col.BudgetClockState != nil && *col.BudgetClockState != "" {
+			return *col.BudgetClockState, nil
+		}
+	}
+	return model.ClockRunning, nil
 }
 
 // clockStateForEntityLink maps a link onto what it means for the clock, and
@@ -364,6 +414,11 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		writeError(w, 500, err.Error())
 		return
 	}
+	assignmentsByCard, err := a.store.ListCardAssignmentsForCards(ids)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	eventsByCard, err := a.store.ListCardEventsForCards(ids, col.BoardID)
 	if err != nil {
 		writeError(w, 500, err.Error())
@@ -391,7 +446,8 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		})
 		summary.Segments = nil
 		cards = append(cards, model.CardView{
-			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Time: summary,
+			Placement: p, Item: items[i], Links: linksByCard[p.CardID],
+			Assignments: assignmentsByCard[p.CardID], Time: summary,
 		})
 	}
 	writeJSON(w, 200, model.ColumnView{Column: col, Cards: cards, Total: total})

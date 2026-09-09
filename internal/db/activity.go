@@ -410,6 +410,32 @@ func (s *Store) ListCardLinksForCards(cardIDs []string) (map[string][]model.Card
 	return out, rows.Err()
 }
 
+// ListCardAssignmentsForCards fetches the assignments of many cards in one
+// query, grouped by card and oldest first within each — the same shape as
+// ListCardLinksForCards, for the same reason: a board view asks once, not once
+// per card.
+func (s *Store) ListCardAssignmentsForCards(cardIDs []string) (map[string][]model.CardAssignment, error) {
+	out := map[string][]model.CardAssignment{}
+	if len(cardIDs) == 0 {
+		return out, nil
+	}
+	q := `SELECT ` + cardAssignmentColumns + ` FROM card_assignments
+	      WHERE card_id IN (` + placeholders(len(cardIDs)) + `) ORDER BY created_at ASC, principal_id ASC`
+	rows, err := s.db.Query(q, anySlice(cardIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanCardAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[a.CardID] = append(out[a.CardID], a)
+	}
+	return out, rows.Err()
+}
+
 // ListCardEventsForCards fetches the events of many cards in one query, scoped to
 // a board the way ListCardEvents is: that board's events plus the card-wide ones.
 func (s *Store) ListCardEventsForCards(cardIDs []string, boardID string) (map[string][]model.CardEvent, error) {

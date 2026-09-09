@@ -69,6 +69,12 @@ const (
 	EventNoteAdded       EventKind = "note_added"
 	EventWaitingStarted  EventKind = "waiting_started"
 	EventWaitingEnded    EventKind = "waiting_ended"
+	// EventAssigned and EventUnassigned are a principal being put on the card
+	// or taken off it. Like a move they have no kind-level clock state (see the
+	// map below): who is on the work says nothing about whether the work is
+	// runnable, so the event carries whatever state the card was already in.
+	EventAssigned   EventKind = "assigned"
+	EventUnassigned EventKind = "unassigned"
 )
 
 // defaultClockStateByEventKind is what each action means for the clock when the
@@ -79,6 +85,11 @@ const (
 // EventCardMoved is absent on purpose. A move means whatever the destination
 // column declares it means, so the state comes from the column and there is no
 // kind-level default to fall back on.
+//
+// EventAssigned and EventUnassigned are absent for the same reason. Assignment
+// neither starts nor stops the clock; the handler records them with the state
+// the card is already in (its last action, or failing that its column), and a
+// caller posting one by hand has to say which state it means.
 var defaultClockStateByEventKind = map[EventKind]ClockState{
 	EventCardCreated:     ClockRunning,
 	EventCardAttached:    ClockRunning,

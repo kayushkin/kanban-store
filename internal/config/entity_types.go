@@ -59,6 +59,17 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{`prediction_\d{6,}`},
 	},
 
+	{
+		Type: "principal", Service: "principal-store", Search: "/principals?q=",
+		Get: "/principals/{id}",
+		// Same design as prediction: principal-store mints principal_000001
+		// rather than a uuid, so this pattern can exist without colliding with
+		// note's uuid claim. The pattern is also what the card-assignment write
+		// path checks an id against before calling principal-store — declared
+		// once, in PrincipalIDPattern, and read from both places.
+		IDPatterns: []string{PrincipalIDPattern},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//

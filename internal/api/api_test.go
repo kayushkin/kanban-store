@@ -16,6 +16,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
+	"github.com/kayushkin/kanban-store/internal/principalstore"
 )
 
 // ============================ Test harness ============================
@@ -220,9 +221,31 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// setup builds an API backed by a fresh temp SQLite store and an in-memory
-// fake noteboard. The returned cleanup tears both down.
+// setup builds an API backed by a fresh temp SQLite store, an in-memory fake
+// noteboard and a stub principal-store (see assignments_test.go for what it
+// knows). The returned cleanup tears all three down.
 func setup(t *testing.T) (http.Handler, *fakeNoteboard, func()) {
+	t.Helper()
+	principals := httptest.NewServer(newFakePrincipalStore().handler())
+	h, nb, cleanup := setupAgainstPrincipalStore(t, principals.URL)
+	return h, nb, func() {
+		cleanup()
+		principals.Close()
+	}
+}
+
+// setupAgainstPrincipalStore is setup with the principal-store URL chosen by
+// the test — pointed at a closed port to exercise the unreachable path.
+func setupAgainstPrincipalStore(t *testing.T, principalStoreURL string) (http.Handler, *fakeNoteboard, func()) {
+	t.Helper()
+	h, nb, _, cleanup := setupExposingStore(t, principalStoreURL)
+	return h, nb, cleanup
+}
+
+// setupExposingStore also hands back the store itself, for the tests that need
+// to build state no HTTP route will — a placement with no event behind it, the
+// shape of every card that predates the event log.
+func setupExposingStore(t *testing.T, principalStoreURL string) (http.Handler, *fakeNoteboard, *db.Store, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := db.New(filepath.Join(dir, "test.db"))
@@ -231,8 +254,8 @@ func setup(t *testing.T) (http.Handler, *fakeNoteboard, func()) {
 	}
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
-	a := api.New(store, noteboard.New(srv.URL))
-	return a.Handler(), nb, func() {
+	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL))
+	return a.Handler(), nb, store, func() {
 		srv.Close()
 		store.Close()
 	}

@@ -94,6 +94,15 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_card_links_card   ON card_links(card_id);
 		CREATE INDEX IF NOT EXISTS idx_card_links_entity ON card_links(entity_type, entity_ref);
 
+		CREATE TABLE IF NOT EXISTS card_assignments (
+			card_id      TEXT NOT NULL,
+			principal_id TEXT NOT NULL,
+			assigned_by  TEXT NOT NULL DEFAULT '',
+			created_at   DATETIME NOT NULL,
+			PRIMARY KEY (card_id, principal_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_card_assignments_principal ON card_assignments(principal_id);
+
 		CREATE TABLE IF NOT EXISTS entity_tags (
 			entity_type TEXT NOT NULL,
 			entity_ref  TEXT NOT NULL,
@@ -625,6 +634,111 @@ func (s *Store) ListCardsByEntity(entityType, entityRef string) ([]string, error
 	return out, rows.Err()
 }
 
+// ============================ Card assignments ============================
+
+const cardAssignmentColumns = `card_id, principal_id, assigned_by, created_at`
+
+func scanCardAssignment(r scanner) (model.CardAssignment, error) {
+	var a model.CardAssignment
+	err := r.Scan(&a.CardID, &a.PrincipalID, &a.AssignedBy, &a.CreatedAt)
+	return a, err
+}
+
+// AssignPrincipalToCard records that a principal is on a card. It is idempotent
+// on (card_id, principal_id): created reports whether THIS call wrote the row,
+// so the API can answer 201 for a new assignment and 200 for one already there.
+// A repeat does not touch assigned_by or created_at — who put them on the card
+// first, and when, is the fact worth keeping.
+func (s *Store) AssignPrincipalToCard(cardID, principalID, assignedBy string) (assignment *model.CardAssignment, created bool, err error) {
+	candidate := &model.CardAssignment{
+		CardID: cardID, PrincipalID: principalID, AssignedBy: assignedBy, CreatedAt: now(),
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO card_assignments (`+cardAssignmentColumns+`) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(card_id, principal_id) DO NOTHING`,
+		candidate.CardID, candidate.PrincipalID, candidate.AssignedBy, candidate.CreatedAt,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if n == 1 {
+		return candidate, true, nil
+	}
+	existing, err := s.GetCardAssignment(cardID, principalID)
+	if err != nil {
+		return nil, false, err
+	}
+	return existing, false, nil
+}
+
+func (s *Store) GetCardAssignment(cardID, principalID string) (*model.CardAssignment, error) {
+	a, err := scanCardAssignment(s.db.QueryRow(
+		`SELECT `+cardAssignmentColumns+` FROM card_assignments WHERE card_id=? AND principal_id=?`,
+		cardID, principalID,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// ListCardAssignments returns who is on a card, oldest assignment first. Ties
+// break on principal_id so the order is total.
+func (s *Store) ListCardAssignments(cardID string) ([]model.CardAssignment, error) {
+	return s.queryCardAssignments(
+		`SELECT `+cardAssignmentColumns+` FROM card_assignments WHERE card_id=?
+		 ORDER BY created_at ASC, principal_id ASC`, cardID,
+	)
+}
+
+// ListCardAssignmentsByPrincipal is the reverse lookup: every card a principal
+// is on, across every board, oldest assignment first.
+func (s *Store) ListCardAssignmentsByPrincipal(principalID string) ([]model.CardAssignment, error) {
+	return s.queryCardAssignments(
+		`SELECT `+cardAssignmentColumns+` FROM card_assignments WHERE principal_id=?
+		 ORDER BY created_at ASC, card_id ASC`, principalID,
+	)
+}
+
+func (s *Store) queryCardAssignments(q string, args ...any) ([]model.CardAssignment, error) {
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.CardAssignment{}
+	for rows.Next() {
+		a, err := scanCardAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UnassignPrincipalFromCard removes one assignment; ErrNotFound if it was not
+// there, so a DELETE of a principal who was never on the card is a 404 rather
+// than a 204 that claims to have changed something.
+func (s *Store) UnassignPrincipalFromCard(cardID, principalID string) error {
+	res, err := s.db.Exec(`DELETE FROM card_assignments WHERE card_id=? AND principal_id=?`, cardID, principalID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ============================ Entity tags ============================
 
 func (s *Store) AddEntityTag(entityType, entityRef, tag string) (*model.EntityTag, error) {
@@ -731,7 +845,7 @@ func (s *Store) ListAllEntityTags() ([]model.TagCount, error) {
 // ============================ Health ============================
 
 func (s *Store) Counts() (map[string]int, error) {
-	tables := []string{"boards", "columns", "placements", "card_links", "entity_tags"}
+	tables := []string{"boards", "columns", "placements", "card_links", "card_assignments", "entity_tags"}
 	out := map[string]int{}
 	for _, t := range tables {
 		var n int

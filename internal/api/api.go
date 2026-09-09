@@ -13,16 +13,21 @@ import (
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
+	"github.com/kayushkin/kanban-store/internal/principalstore"
 	"github.com/kayushkin/kanban-store/internal/timeaccounting"
 )
 
 type API struct {
 	store     *db.Store
 	noteboard *noteboard.Client
+	// principals is consulted on exactly one write: assigning a principal to a
+	// card. See internal/principalstore for why this otherwise-dumb store checks
+	// that one reference.
+	principals *principalstore.Client
 }
 
-func New(store *db.Store, nb *noteboard.Client) *API {
-	return &API{store: store, noteboard: nb}
+func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client) *API {
+	return &API{store: store, noteboard: nb, principals: principals}
 }
 
 func (a *API) Handler() http.Handler {
@@ -48,6 +53,9 @@ func (a *API) Handler() http.Handler {
 	// reverse lookups by entity
 	mux.HandleFunc("/api/entities/", a.entityScoped)
 
+	// reverse lookup by principal: every card someone is assigned to
+	mux.HandleFunc("/api/assignments", a.assignmentsByPrincipal)
+
 	// entity-type registry & cross-entity tag listing
 	mux.HandleFunc("/api/entity-types", a.entityTypes)
 	mux.HandleFunc("/api/tags", a.allTags)
@@ -61,7 +69,7 @@ func (a *API) Handler() http.Handler {
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
@@ -525,6 +533,8 @@ func (a *API) checkWIP(columnID string) error {
 //	/api/cards/:cardID/events         — GET, POST  (the action log)
 //	/api/cards/:cardID/notes          — GET, POST  (status updates and summaries)
 //	/api/cards/:cardID/timeline       — GET   (events + notes + the time they took)
+//	/api/cards/:cardID/assignments    — GET   (who is on the card)
+//	/api/cards/:cardID/assignments/:principalID — PUT (idempotent) | DELETE
 func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/cards/")
 	if rest == "" {
@@ -563,6 +573,15 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	case "timeline":
 		a.cardTimeline(w, r, cardID)
 		return
+	case "assignments":
+		if len(parts) == 2 {
+			a.cardAssignments(w, r, cardID)
+			return
+		}
+		if len(parts) == 3 && parts[2] != "" {
+			a.cardAssignmentByPrincipal(w, r, cardID, parts[2])
+			return
+		}
 	}
 	writeError(w, 404, "not found")
 }
@@ -1042,6 +1061,10 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 	if err != nil {
 		return nil, err
 	}
+	assignmentsByCard, err := a.store.ListCardAssignmentsForCards(ids)
+	if err != nil {
+		return nil, err
+	}
 	ladder, err := a.store.GetPriorityLadder(boardID)
 	if err != nil {
 		return nil, err
@@ -1052,7 +1075,9 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 	byCol := map[string][]model.CardView{}
 	var orphans []model.CardView
 	for i, p := range placements {
-		cv := model.CardView{Placement: p, Item: items[i], Links: linksByCard[p.CardID]}
+		cv := model.CardView{
+			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Assignments: assignmentsByCard[p.CardID],
+		}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],
 			Level:  ladder.LevelFor(priorityOfItem(items[i])),

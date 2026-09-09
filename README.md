@@ -15,13 +15,16 @@ clock. That log is what answers *how long has this taken, how much of it was tim
 the work could actually be done, and is that inside the limit its priority sets*.
 See [Time accounting](#time-accounting).
 
-On top of that it keeps two cross-cutting indexes: **card links**, pointing a
-card at an external entity (a repo, a machine, an agent session), and **entity
-tags**, which tag those same entities without involving a card at all.
+On top of that it keeps three cross-cutting indexes: **card links**, pointing a
+card at an external entity (a repo, a machine, an agent session), **card
+assignments**, saying which principals are on a card, and **entity tags**, which
+tag those same entities without involving a card at all.
 
 It is deliberately dumb. It does not proxy to the services those entities belong
 to, and it does not check that an entity ref exists. It publishes a registry of
-entity types so a client can resolve refs itself.
+entity types so a client can resolve refs itself. The one exception is a card
+assignment, which is checked against principal-store before it is written — see
+[Card assignments](#card-assignments) for why that one reference is different.
 
 [noteboard]: https://github.com/kayushkin/noteboard
 
@@ -57,6 +60,7 @@ KANBAN_NOTEBOARD_URL=http://localhost:8191 ./bin/kanban-store
 | `KANBAN_PORT` | `8305` | Port to listen on |
 | `KANBAN_DB` | `$HOME/.kanban-store/kanban-store.db` | SQLite file; created with its schema on first run |
 | `KANBAN_NOTEBOARD_URL` | `http://localhost:8191` | Base URL of the noteboard service |
+| `PRINCIPAL_STORE_URL` | `http://127.0.0.1:8314` | Base URL of principal-store, asked once per card assignment whether the principal exists |
 
 `systemd/kanban-store.service` is a `--user` unit. `deploy.sh` reads the binary
 path, port and database path back *out of* that unit rather than restating them,
@@ -182,6 +186,48 @@ linking idempotent.
 The reverse lookup returns parallel `card_id`/`item` pairs so a caller can spot
 orphans — a `null` item means the noteboard item is gone but the link is not.
 
+### Card assignments
+
+Who is on a card. An assignment is its own fact about the card and not a card
+link: a link's `label` is a display name and its uniqueness is per entity ref,
+and neither is what "assigned" means. Principals are owned by the
+`principal-store` service; kanban-store stores the id it minted
+(`principal_000001`) and never the name. There is no role — version one answers
+"who is assigned", and owner versus reviewer is a later question.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/cards/{id}/assignments` | `[{"card_id":…,"principal_id":…,"assigned_by":…,"created_at":…}]`, oldest first |
+| `PUT` | `/api/cards/{id}/assignments/{principal_id}` | Idempotent: **201** + the row when this call created it, **200** + the unchanged row when it was already there. `assigned_by` is `?actor=` |
+| `DELETE` | `/api/cards/{id}/assignments/{principal_id}` | **204**; **404** if the principal was not on the card |
+| `GET` | `/api/assignments?principal_id=…` | Reverse lookup: every card this principal is on, across every board, oldest first. **400** without the parameter |
+
+Assignments ride along on every card view — `assignments` on each card in
+`GET /api/boards/{id}/cards` and `GET /api/columns/{id}/cards` — and the field is
+omitted when nobody is on the card.
+
+**This is the one write on which kanban-store checks a reference against the
+service that owns it.** On `PUT`, `principal_id` must match `^principal_\d{6,}$`
+(**400** otherwise, before anything is called), and then
+`GET {PRINCIPAL_STORE_URL}/principals/{principal_id}` is asked, with a 3-second
+timeout:
+
+- **404** from principal-store → **400** `principal_id principal_000099 does not exist in principal-store`
+- `disabled_at` set → **400** `principal_id … is disabled in principal-store`
+- unreachable, timed out, or any other non-200 → **502** `principal-store check failed: …` carrying the transport error verbatim, and **the row is not written**
+
+A link to a session that has gone is a dangling pointer a reader can notice; an
+assignment to a principal that does not exist is a silently wrong row forever,
+reported by the reverse lookup as work for someone who is not there. Refusing
+the write when the check cannot run is the point, not a limitation — the store
+never accepts an assignment because it could not ask.
+
+Assigning and unassigning are actions on the card and join its timeline as
+`assigned` / `unassigned` events: `summary` is the principal id, `detail` is
+`{"principal_id":…}`, and neither carries a board because who is on the card is
+true wherever it sits. Only the **201** path of a `PUT` logs one. Neither moves
+the clock — see [What each action means for the clock](#what-each-action-means-for-the-clock).
+
 ### Entity tags
 
 Tag any `(entity_type, entity_ref)` pair without involving a card — mark a
@@ -248,6 +294,17 @@ Everything that puts work in front of us runs the clock (`card_created`,
 pauses it (`card_held`, `waiting_started`); only finishing stops it
 (`card_completed`, `card_detached`). A move takes its state from the destination
 column, because that is where a column's classification is for.
+
+`assigned` and `unassigned` say who is on the card, not whether the work is
+runnable, so they carry the clock forward unchanged: each is recorded with the
+state the card is already in, and a paused card stays paused and a finished card
+stays finished through either. "Already in" means the card's most recent action
+on any board; for a card with no history yet — most cards here predate the log —
+it is the classification of the column the card sits in, and only a card with no
+history in an unclassified column is recorded `running`, the same answer the
+store gives any first action on such a card. Like `card_moved`, the two kinds
+have no default of their own — posting one by hand to `/events` without a
+`clock_state` is a **400**.
 
 `kind` is deliberately open — record an action this service has never heard of and
 it is kept. What an unknown kind **cannot** do is guess its own clock state, so

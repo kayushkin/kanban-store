@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 
 	"github.com/kayushkin/kanban-store/internal/api"
+	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
+	"github.com/kayushkin/kanban-store/internal/principalstore"
 )
 
 func main() {
@@ -35,10 +37,11 @@ func main() {
 	}
 	defer store.Close()
 
+	principalStoreURL := config.PrincipalStoreURL()
 	nb := noteboard.New(noteboardURL)
-	a := api.New(store, nb)
+	a := api.New(store, nb, principalstore.New(principalStoreURL))
 
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s)", addr, dbPath, noteboardURL)
+	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s)", addr, dbPath, noteboardURL, principalStoreURL)
 	log.Fatal(http.ListenAndServe(addr, a.Handler()))
 }

@@ -122,9 +122,12 @@ assert_eq() {
 start_server() {
   local noteboard_url="$1" label="$2"
   step "boot kanban-store on :$PORT ($label)"
+  # principal-store is never contacted: the only route that calls it (card
+  # assignment) is asserted on its fail-loud path below, against a closed port.
   KANBAN_PORT="$PORT" \
   KANBAN_DB="$DB_PATH" \
   KANBAN_NOTEBOARD_URL="$noteboard_url" \
+  PRINCIPAL_STORE_URL="$NB_UNREACHABLE" \
     "$BIN_DIR/kanban-store" >>"$TMP_DIR/server.log" 2>&1 &
   SERVER_PID=$!
   echo "    pid: $SERVER_PID  db: $DB_PATH  noteboard: $noteboard_url"
@@ -284,6 +287,21 @@ assert_eq e2e-session-1  "$(jget '.[0].entity_ref')" "read-back link entity_ref"
 CODE=$(req POST "/api/cards/$LINK_CARD/links" '{"entity_type":"session"}')
 expect 400 "$CODE" "POST card link with no entity_ref"
 
+step "PUT /api/cards/:id/assignments/:principal — a failed principal-store check fails the write (502), never a silent row"
+CODE=$(req PUT "/api/cards/$LINK_CARD/assignments/principal_000001")
+expect 502 "$CODE" "PUT assignment with principal-store unreachable"
+jget '.error' | grep -q 'principal-store check failed' \
+  || fail "502 body did not name the principal-store check: $(cat "$BODY")"
+CODE=$(req PUT "/api/cards/$LINK_CARD/assignments/not-a-principal")
+expect 400 "$CODE" "PUT assignment with a malformed principal id"
+CODE=$(req GET "/api/cards/$LINK_CARD/assignments"); expect 200 "$CODE" "GET card assignments"
+assert_eq 0 "$(jget 'length')" "no assignment row leaked from the refused writes"
+CODE=$(req DELETE "/api/cards/$LINK_CARD/assignments/principal_000001")
+expect 404 "$CODE" "DELETE an assignment that was never made"
+CODE=$(req GET "/api/assignments"); expect 400 "$CODE" "GET /api/assignments with no principal_id"
+CODE=$(req GET "/api/assignments?principal_id=principal_000001"); expect 200 "$CODE" "GET /api/assignments reverse lookup"
+assert_eq 0 "$(jget 'length')" "reverse lookup is empty"
+
 step "POST /api/entities/:type/:ref/tags — cross-entity tagging"
 CODE=$(req POST /api/entities/session/e2e-session-1/tags '{"tag":"e2e-tag"}')
 expect 201 "$CODE" "POST entity tag"
@@ -314,6 +332,7 @@ CODE=$(req GET /health); expect 200 "$CODE" "/health end of phase A"
 assert_eq 1 "$(jget '.counts.boards')"      "board count"
 assert_eq 4 "$(jget '.counts.columns')"     "column count"
 assert_eq 1 "$(jget '.counts.card_links')"  "card_link count"
+assert_eq 0 "$(jget '.counts.card_assignments')" "card_assignment count"
 assert_eq 1 "$(jget '.counts.entity_tags')" "entity_tag count"
 
 stop_server
