@@ -33,7 +33,10 @@ var EntityTypes = []model.EntityTypeInfo{
 		},
 	},
 	{Type: "instance", Service: "llm-bridge-server", Search: "/api/instances?q="},
-	{Type: "machine", Service: "healthcheck", Search: "/api/services?q="},
+	// A machine is harness-store's row (m_localhost, m_dab03bcd1cb57fe7), which
+	// llm-bridge-server serves at /machines. This row used to name healthcheck's
+	// /api/services, a route that answers 404 and has never listed a machine.
+	{Type: "machine", Service: "llm-bridge-server", Search: "/machines"},
 	{Type: "service", Service: "healthcheck", Search: "/api/services?q="},
 	{Type: "skill", Service: "skill-store", Search: "/skills?q="},
 	{Type: "tool", Service: "tool-store", Search: "/tools?q="},
