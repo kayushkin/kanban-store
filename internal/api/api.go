@@ -11,6 +11,7 @@ import (
 
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
@@ -24,10 +25,13 @@ type API struct {
 	// card. See internal/principalstore for why this otherwise-dumb store checks
 	// that one reference.
 	principals *principalstore.Client
+	// bridge is consulted on one write: setting a board's default agent or
+	// default instance. See internal/llmbridge for why.
+	bridge *llmbridge.Client
 }
 
-func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client) *API {
-	return &API{store: store, noteboard: nb, principals: principals}
+func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client) *API {
+	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge}
 }
 
 func (a *API) Handler() http.Handler {
@@ -204,6 +208,10 @@ func (a *API) boardByID(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		if err := req.Validate(); err != nil {
 			writeError(w, 400, err.Error())
+			return
+		}
+		if err := a.checkBoardSettings(&req); err != nil {
+			writeSettingsCheckFailure(w, err)
 			return
 		}
 		b, err := a.store.UpdateBoard(id, &req)
@@ -391,6 +399,11 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 409, err.Error())
 			return
 		}
+		defaultAssignee, err := a.boardDefaultAssigneeFor(boardID)
+		if err != nil {
+			writeSettingsCheckFailure(w, err)
+			return
+		}
 		p, err := a.store.AttachCard(boardID, cardID, &req)
 		if err != nil {
 			mapDBErr(w, err)
@@ -401,6 +414,10 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			ClockState: a.clockStateForColumn(cardID, boardID, req.ColumnID),
 			Actor:      actorFrom(r), ToColumnID: req.ColumnID,
 		}); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		if _, err := a.applyBoardDefaultAssignee(cardID, defaultAssignee, actorFrom(r)); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
@@ -446,6 +463,11 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 	}
 	if err := a.checkWIP(req.ColumnID); err != nil {
 		writeError(w, 409, err.Error())
+		return
+	}
+	defaultAssignee, err := a.boardDefaultAssigneeFor(boardID)
+	if err != nil {
+		writeSettingsCheckFailure(w, err)
 		return
 	}
 
@@ -502,7 +524,12 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 201, model.CardView{Placement: p, Item: item})
+	assignments, err := a.applyBoardDefaultAssignee(cardID, defaultAssignee, actorFrom(r))
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 201, model.CardView{Placement: p, Item: item, Assignments: assignments})
 }
 
 // checkWIP returns an error if attaching another card would exceed the column's wip_limit.

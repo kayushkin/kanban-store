@@ -141,7 +141,7 @@ func (s *Store) CreateBoard(req *model.CreateBoardRequest) (*model.Board, error)
 }
 
 func (s *Store) ListBoards(includeArchived bool) ([]*model.Board, error) {
-	q := `SELECT id, name, description, archived, business_hours, created_at, updated_at FROM boards`
+	q := `SELECT ` + boardColumns + ` FROM boards`
 	if !includeArchived {
 		q += ` WHERE archived = 0`
 	}
@@ -164,7 +164,7 @@ func (s *Store) ListBoards(includeArchived bool) ([]*model.Board, error) {
 
 func (s *Store) GetBoard(id string) (*model.Board, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, description, archived, business_hours, created_at, updated_at FROM boards WHERE id = ?`, id,
+		`SELECT `+boardColumns+` FROM boards WHERE id = ?`, id,
 	)
 	b, err := scanBoard(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -176,11 +176,16 @@ func (s *Store) GetBoard(id string) (*model.Board, error) {
 // scanBoard reads a board row, decoding the business-hours JSON blob. A board
 // that has never been given hours keeps a nil BusinessHours, which is what makes
 // the business-hours figures absent rather than zero further down.
+// boardColumns is the one spelling of the boards row every read shares.
+const boardColumns = `id, name, description, archived, business_hours,
+	default_principal_id, default_agent_id, default_instance_id, classifier, created_at, updated_at`
+
 func scanBoard(r scanner) (*model.Board, error) {
 	b := &model.Board{}
 	var arch int
-	var hours sql.NullString
-	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours, &b.CreatedAt, &b.UpdatedAt); err != nil {
+	var hours, defaultPrincipal, defaultAgent, defaultInstance, classifier sql.NullString
+	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours,
+		&defaultPrincipal, &defaultAgent, &defaultInstance, &classifier, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	b.Archived = arch != 0
@@ -191,7 +196,38 @@ func scanBoard(r scanner) (*model.Board, error) {
 		}
 		b.BusinessHours = &bh
 	}
+	b.DefaultPrincipalID = defaultPrincipal.String
+	b.DefaultAgentID = defaultAgent.String
+	b.DefaultInstanceID = defaultInstance.String
+	if classifier.Valid && strings.TrimSpace(classifier.String) != "" {
+		var cc model.ClassifierConfig
+		if err := json.Unmarshal([]byte(classifier.String), &cc); err != nil {
+			return nil, fmt.Errorf("board %s has unreadable classifier: %w", b.ID, err)
+		}
+		b.Classifier = &cc
+	}
 	return b, nil
+}
+
+// nullableText stores "" as NULL so a cleared setting reads back as absent
+// rather than as an empty id.
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// nullableJSON encodes a settings object, or NULL when there is none.
+func nullableJSON(value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return string(encoded), nil
 }
 
 func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Board, error) {
@@ -217,6 +253,22 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 			b.BusinessHours = req.BusinessHours
 		}
 	}
+	if req.DefaultPrincipalID != nil {
+		b.DefaultPrincipalID = *req.DefaultPrincipalID
+	}
+	if req.DefaultAgentID != nil {
+		b.DefaultAgentID = *req.DefaultAgentID
+	}
+	if req.DefaultInstanceID != nil {
+		b.DefaultInstanceID = *req.DefaultInstanceID
+	}
+	if req.Classifier != nil {
+		if req.Classifier.Cleared() {
+			b.Classifier = nil
+		} else {
+			b.Classifier = req.Classifier
+		}
+	}
 	b.UpdatedAt = now()
 	arch := 0
 	if b.Archived {
@@ -230,9 +282,20 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		}
 		hours = string(encoded)
 	}
+	var classifier any
+	if b.Classifier != nil {
+		encoded, err := nullableJSON(b.Classifier)
+		if err != nil {
+			return nil, err
+		}
+		classifier = encoded
+	}
 	_, err = s.db.Exec(
-		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?, updated_at=? WHERE id=?`,
-		b.Name, b.Description, arch, hours, b.UpdatedAt, id,
+		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?,
+		 default_principal_id=?, default_agent_id=?, default_instance_id=?, classifier=?, updated_at=? WHERE id=?`,
+		b.Name, b.Description, arch, hours,
+		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), classifier,
+		b.UpdatedAt, id,
 	)
 	return b, err
 }

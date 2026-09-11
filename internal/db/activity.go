@@ -64,6 +64,13 @@ func migrateActivity(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "boards", "business_hours", "TEXT"); err != nil {
 		return err
 	}
+	// Board settings a dispatcher or classifier reads instead of taking as a
+	// flag. Every one is nullable: absent means "no board-level answer".
+	for _, column := range []string{"default_principal_id", "default_agent_id", "default_instance_id", "classifier"} {
+		if err := addColumnIfMissing(db, "boards", column, "TEXT"); err != nil {
+			return err
+		}
+	}
 	return addColumnIfMissing(db, "columns", "budget_clock_state", "TEXT")
 }
 

@@ -102,7 +102,7 @@ All request and response bodies are JSON.
 | `GET` | `/api/boards` | `?include_archived=true` to include archived boards |
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
-| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived` |
+| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `classifier` — see [Board settings](#board-settings) |
 | `DELETE` | `/api/boards/{id}` | |
 
 ### Columns
@@ -377,6 +377,46 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{"business_hours":
 rules demand one: an offset is not a zone, and hours anchored to one drift an hour
 twice a year. A board without hours reports no business figures at all rather than
 a guessed nine-to-five. Send `{"business_hours":{}}` to clear them.
+
+### Board settings
+
+A board carries the defaults a dispatcher or classifier used to take as flags
+on a cron job, so the board is the one place the answer lives and the scheduler
+owns only *when* a job runs:
+
+```sh
+curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
+  "default_principal_id": "principal_000004",
+  "default_agent_id":     "17",
+  "default_instance_id":  "inst-cc-local",
+  "classifier": {"vocabulary":"work","mail_account_ids":["demo-work"],"hold_new_cards":true}}'
+```
+
+| Field | Owner asked before the write | Read by |
+|---|---|---|
+| `default_principal_id` | principal-store (`PRINCIPAL_STORE_URL`) — must exist and not be disabled | kanban-store itself, see below |
+| `default_agent_id` | llm-bridge-server (`LLM_BRIDGE_URL`) `GET /agents` — agent-store's **numeric id**, never the slug, which is renameable | the dispatcher that spawns sessions for the board's cards |
+| `default_instance_id` | llm-bridge-server `GET /instances/{id}` | the same dispatcher |
+| `classifier.vocabulary` | nobody here — email-classifier owns its vocabularies and refuses a board naming one it lacks (`email-classifier -list-vocabularies`) | email-classifier |
+| `classifier.mail_account_ids` | nobody here — mailstack is behind a token this store does not hold; the classifier checks them at run time. Explicit, never "every account" | email-classifier |
+| `classifier.hold_new_cards` | — | email-classifier |
+
+An owner that says the id does not exist is a **400** and an owner that could
+not be asked is a **502**; nothing is written on either. An empty string clears
+an id and `{"classifier":{}}` clears the classifier; a cleared setting is absent
+from the board on the wire, not an empty string. Omitting a field leaves it
+alone.
+
+**The default principal is applied by kanban-store, not by the caller.** When
+a card is created on the board or attached to it and has no assignee, the
+board's default goes on it — as an assignment row and an `assigned` event whose
+detail says `"source":"board_default"`, with `assigned_by` the creating actor.
+A card that already has someone on it is left alone: a default fills a blank
+and never overrides a person's choice. The default is re-checked with
+principal-store on every application, before the noteboard item is created, so
+a person disabled since the setting was made refuses the card with a 400 that
+names `default_principal_id` rather than filing new work to someone who has
+left.
 
 ### Paging a board
 
