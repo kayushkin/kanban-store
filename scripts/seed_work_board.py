@@ -10,7 +10,7 @@ it up, checked every branch and all twelve commits, refused, and wrote down
 why — behaving exactly as instructed, at the cost of a real session.
 
 Cards now arrive the way they will in use: `demo-mail-generator` writes work
-mail about the actual repository, and `email-classifier -vocabulary work` files
+mail about the actual repository, and `email-classifier`, reading the Work board's `classifier` setting (vocabulary `work`), files
 that mail onto the board. Nothing here invents work.
 
 Two boards, because they answer different questions about the same cards:
