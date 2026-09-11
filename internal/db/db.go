@@ -178,14 +178,14 @@ func (s *Store) GetBoard(id string) (*model.Board, error) {
 // the business-hours figures absent rather than zero further down.
 // boardColumns is the one spelling of the boards row every read shares.
 const boardColumns = `id, name, description, archived, business_hours,
-	default_principal_id, default_agent_id, default_instance_id, classifier, created_at, updated_at`
+	default_principal_id, default_agent_id, default_instance_id, default_bundle_id, classifier, created_at, updated_at`
 
 func scanBoard(r scanner) (*model.Board, error) {
 	b := &model.Board{}
 	var arch int
-	var hours, defaultPrincipal, defaultAgent, defaultInstance, classifier sql.NullString
+	var hours, defaultPrincipal, defaultAgent, defaultInstance, defaultBundle, classifier sql.NullString
 	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours,
-		&defaultPrincipal, &defaultAgent, &defaultInstance, &classifier, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		&defaultPrincipal, &defaultAgent, &defaultInstance, &defaultBundle, &classifier, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	b.Archived = arch != 0
@@ -199,6 +199,7 @@ func scanBoard(r scanner) (*model.Board, error) {
 	b.DefaultPrincipalID = defaultPrincipal.String
 	b.DefaultAgentID = defaultAgent.String
 	b.DefaultInstanceID = defaultInstance.String
+	b.DefaultBundleID = defaultBundle.String
 	if classifier.Valid && strings.TrimSpace(classifier.String) != "" {
 		var cc model.ClassifierConfig
 		if err := json.Unmarshal([]byte(classifier.String), &cc); err != nil {
@@ -262,6 +263,9 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 	if req.DefaultInstanceID != nil {
 		b.DefaultInstanceID = *req.DefaultInstanceID
 	}
+	if req.DefaultBundleID != nil {
+		b.DefaultBundleID = *req.DefaultBundleID
+	}
 	if req.Classifier != nil {
 		if req.Classifier.Cleared() {
 			b.Classifier = nil
@@ -292,9 +296,9 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 	}
 	_, err = s.db.Exec(
 		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?,
-		 default_principal_id=?, default_agent_id=?, default_instance_id=?, classifier=?, updated_at=? WHERE id=?`,
+		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, updated_at=? WHERE id=?`,
 		b.Name, b.Description, arch, hours,
-		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), classifier,
+		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier,
 		b.UpdatedAt, id,
 	)
 	return b, err

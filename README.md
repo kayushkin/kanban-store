@@ -102,7 +102,7 @@ All request and response bodies are JSON.
 | `GET` | `/api/boards` | `?include_archived=true` to include archived boards |
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
-| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `classifier` — see [Board settings](#board-settings) |
+| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier` — see [Board settings](#board-settings) |
 | `DELETE` | `/api/boards/{id}` | |
 
 ### Columns
@@ -389,6 +389,7 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
   "default_principal_id": "principal_000004",
   "default_agent_id":     "17",
   "default_instance_id":  "inst-cc-local",
+  "default_bundle_id":    "6",
   "classifier": {"vocabulary":"work","mail_account_ids":["demo-work"],"hold_new_cards":true}}'
 ```
 
@@ -397,6 +398,7 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
 | `default_principal_id` | principal-store (`PRINCIPAL_STORE_URL`) — must exist and not be disabled | kanban-store itself, see below |
 | `default_agent_id` | llm-bridge-server (`LLM_BRIDGE_URL`) `GET /agents` — agent-store's **numeric id**, never the slug, which is renameable | the dispatcher that spawns sessions for the board's cards |
 | `default_instance_id` | llm-bridge-server `GET /instances/{id}` | the same dispatcher |
+| `default_bundle_id` | bundle-store (`BUNDLE_STORE_URL`) `GET /bundles/{id}` — the **numeric id**, not the bundle's name | ⚠️ nobody yet: llm-bridge-server's `POST /sessions` takes no bundle as of 2026-09-11, so this is stored, shown on the settings page and the card, and not applied at dispatch |
 | `classifier.vocabulary` | nobody here — email-classifier owns its vocabularies and refuses a board naming one it lacks (`email-classifier -list-vocabularies`) | email-classifier |
 | `classifier.mail_account_ids` | nobody here — mailstack is behind a token this store does not hold; the classifier checks them at run time. Explicit, never "every account" | email-classifier |
 | `classifier.hold_new_cards` | — | email-classifier |

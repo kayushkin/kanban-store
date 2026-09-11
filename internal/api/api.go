@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
@@ -28,10 +29,12 @@ type API struct {
 	// bridge is consulted on one write: setting a board's default agent or
 	// default instance. See internal/llmbridge for why.
 	bridge *llmbridge.Client
+	// bundles is consulted on one write: setting a board's default bundle.
+	bundles *bundlestore.Client
 }
 
-func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client) *API {
-	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge}
+func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client) *API {
+	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge, bundles: bundles}
 }
 
 func (a *API) Handler() http.Handler {

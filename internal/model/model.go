@@ -32,6 +32,12 @@ type Board struct {
 	// DefaultInstanceID is the llm-bridge-server harness instance that hosts
 	// sessions spawned for this board's cards. Same ownership as DefaultAgentID.
 	DefaultInstanceID string `json:"default_instance_id,omitempty"`
+	// DefaultBundleID is bundle-store's numeric id for the session bundle
+	// (skills and tools) a dispatcher spawns with for this board's cards.
+	// Stored and checked here; ⚠️ as of 2026-09-11 llm-bridge-server's
+	// POST /sessions takes no bundle, so nothing applies it yet — it is shown
+	// and read, not enforced.
+	DefaultBundleID string `json:"default_bundle_id,omitempty"`
 	// Classifier says how mail becomes cards on this board. Absent means no
 	// classifier files onto it. The scheduler still owns WHEN the classifier
 	// runs; this is only WHAT it runs with, so the board is the one place the
@@ -108,6 +114,7 @@ type UpdateBoardRequest struct {
 	DefaultPrincipalID *string `json:"default_principal_id,omitempty"`
 	DefaultAgentID     *string `json:"default_agent_id,omitempty"`
 	DefaultInstanceID  *string `json:"default_instance_id,omitempty"`
+	DefaultBundleID    *string `json:"default_bundle_id,omitempty"`
 	// Classifier replaces the board's classifier config. Sending an empty
 	// object clears it; omitting the field leaves it alone.
 	Classifier *ClassifierConfig `json:"classifier,omitempty"`
@@ -128,6 +135,7 @@ func (r *UpdateBoardRequest) Validate() error {
 		"default_principal_id": r.DefaultPrincipalID,
 		"default_agent_id":     r.DefaultAgentID,
 		"default_instance_id":  r.DefaultInstanceID,
+		"default_bundle_id":    r.DefaultBundleID,
 	} {
 		if value != nil && *value != strings.TrimSpace(*value) {
 			return fmt.Errorf("%s %q has surrounding whitespace, and nothing is trimmed: send the owner's id exactly", name, *value)

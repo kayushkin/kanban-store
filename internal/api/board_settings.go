@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -53,6 +54,14 @@ func (a *API) checkBoardSettings(req *model.UpdateBoardRequest) error {
 				return &settingsCheckFailure{400, "default_instance_id: " + err.Error()}
 			}
 			return &settingsCheckFailure{502, "llm-bridge-server check of default_instance_id failed: " + err.Error()}
+		}
+	}
+	if req.DefaultBundleID != nil && *req.DefaultBundleID != "" {
+		if err := a.bundles.CheckBundleExists(*req.DefaultBundleID); err != nil {
+			if errors.Is(err, bundlestore.ErrNotFound) {
+				return &settingsCheckFailure{400, "default_bundle_id: " + err.Error()}
+			}
+			return &settingsCheckFailure{502, "bundle-store check of default_bundle_id failed: " + err.Error()}
 		}
 	}
 	return nil

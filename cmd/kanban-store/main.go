@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/kayushkin/kanban-store/internal/api"
+	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
@@ -40,11 +41,12 @@ func main() {
 
 	principalStoreURL := config.PrincipalStoreURL()
 	llmBridgeServerURL := config.LLMBridgeServerURL()
+	bundleStoreURL := config.BundleStoreURL()
 	nb := noteboard.New(noteboardURL)
-	a := api.New(store, nb, principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL))
+	a := api.New(store, nb, principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
 
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s, llm-bridge-server: %s)",
-		addr, dbPath, noteboardURL, principalStoreURL, llmBridgeServerURL)
+	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s, llm-bridge-server: %s, bundle-store: %s)",
+		addr, dbPath, noteboardURL, principalStoreURL, llmBridgeServerURL, bundleStoreURL)
 	log.Fatal(http.ListenAndServe(addr, a.Handler()))
 }

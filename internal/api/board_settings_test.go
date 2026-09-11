@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,6 +48,35 @@ func (f *fakeLLMBridgeServer) handler() http.Handler {
 	return mux
 }
 
+// fakeBundleStore stands in for bundle-store's GET /bundles/{id}: integer ids,
+// 400 "invalid id" for anything else, 404 for an integer it does not have.
+type fakeBundleStore struct{}
+
+const (
+	knownBundleID   = "6"
+	knownBundleName = "docker"
+	unknownBundleID = "9999"
+)
+
+func newFakeBundleStore() *fakeBundleStore { return &fakeBundleStore{} }
+
+func (f *fakeBundleStore) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /bundles/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if _, err := strconv.Atoi(id); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid id"})
+			return
+		}
+		if id != knownBundleID {
+			writeJSON(w, 404, map[string]string{"error": "bundle not found"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"id": 6, "name": knownBundleName, "display_name": "Docker"})
+	})
+	return mux
+}
+
 func str(s string) *string { return &s }
 
 func getBoard(t *testing.T, h http.Handler, id string) model.Board {
@@ -76,13 +106,14 @@ func TestBoardSettingsRoundTripAndClear(t *testing.T) {
 		DefaultPrincipalID: str(activePrincipal),
 		DefaultAgentID:     str(knownAgentID),
 		DefaultInstanceID:  str(knownInstanceID),
+		DefaultBundleID:    str(knownBundleID),
 		Classifier:         &model.ClassifierConfig{Vocabulary: "work", MailAccountIDs: []string{"demo-work"}, HoldNewCards: true},
 	})
 	if w.Code != 200 {
 		t.Fatalf("patch: %d %s", w.Code, w.Body.String())
 	}
 	b := getBoard(t, h, boardID)
-	if b.DefaultPrincipalID != activePrincipal || b.DefaultAgentID != knownAgentID || b.DefaultInstanceID != knownInstanceID {
+	if b.DefaultPrincipalID != activePrincipal || b.DefaultAgentID != knownAgentID || b.DefaultInstanceID != knownInstanceID || b.DefaultBundleID != knownBundleID {
 		t.Fatalf("defaults did not round-trip: %+v", b)
 	}
 	if b.Classifier == nil || b.Classifier.Vocabulary != "work" || len(b.Classifier.MailAccountIDs) != 1 || b.Classifier.MailAccountIDs[0] != "demo-work" || !b.Classifier.HoldNewCards {
@@ -99,19 +130,19 @@ func TestBoardSettingsRoundTripAndClear(t *testing.T) {
 
 	// An empty string clears an id; an empty object clears the classifier.
 	w = patchBoard(t, h, boardID, model.UpdateBoardRequest{
-		DefaultPrincipalID: str(""), DefaultAgentID: str(""), DefaultInstanceID: str(""),
+		DefaultPrincipalID: str(""), DefaultAgentID: str(""), DefaultInstanceID: str(""), DefaultBundleID: str(""),
 		Classifier: &model.ClassifierConfig{},
 	})
 	if w.Code != 200 {
 		t.Fatalf("clear: %d %s", w.Code, w.Body.String())
 	}
 	b = getBoard(t, h, boardID)
-	if b.DefaultPrincipalID != "" || b.DefaultAgentID != "" || b.DefaultInstanceID != "" || b.Classifier != nil {
+	if b.DefaultPrincipalID != "" || b.DefaultAgentID != "" || b.DefaultInstanceID != "" || b.DefaultBundleID != "" || b.Classifier != nil {
 		t.Fatalf("clear did not clear: %+v", b)
 	}
 	// And a cleared setting is absent on the wire, not an empty string.
 	raw := do(t, h, "GET", "/api/boards/"+boardID, nil).Body.String()
-	for _, key := range []string{"default_principal_id", "default_agent_id", "default_instance_id", "classifier"} {
+	for _, key := range []string{"default_principal_id", "default_agent_id", "default_instance_id", "default_bundle_id", "classifier"} {
 		if strings.Contains(raw, key) {
 			t.Fatalf("cleared %s still on the wire: %s", key, raw)
 		}
@@ -165,7 +196,13 @@ func TestBoardSettingsRefuseAnUnknownAgentOrASlug(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatalf("instance: want 400, got %d %s", w.Code, w.Body.String())
 	}
-	if b := getBoard(t, h, boardID); b.DefaultAgentID != "" || b.DefaultInstanceID != "" {
+	for _, bundle := range []string{unknownBundleID, knownBundleName} {
+		w := patchBoard(t, h, boardID, model.UpdateBoardRequest{DefaultBundleID: str(bundle)})
+		if w.Code != 400 {
+			t.Fatalf("bundle %q: want 400, got %d %s", bundle, w.Code, w.Body.String())
+		}
+	}
+	if b := getBoard(t, h, boardID); b.DefaultAgentID != "" || b.DefaultInstanceID != "" || b.DefaultBundleID != "" {
 		t.Fatalf("a refused id was written: %+v", b)
 	}
 }
@@ -176,16 +213,17 @@ func TestBoardSettingsWithAnOwnerDownAre502AndWriteNothing(t *testing.T) {
 	closedPort := httptest.NewServer(http.NotFoundHandler())
 	closedPort.Close()
 
-	h, _, _, cleanup := setupWithOwners(t, principals.URL, closedPort.URL)
+	h, _, _, cleanup := setupWithOwners(t, principals.URL, closedPort.URL, closedPort.URL)
 	defer cleanup()
 	boardID := mkBoard(t, h, "Down")
 	for _, req := range []model.UpdateBoardRequest{
 		{DefaultAgentID: str(knownAgentID)},
 		{DefaultInstanceID: str(knownInstanceID)},
+		{DefaultBundleID: str(knownBundleID)},
 	} {
 		w := patchBoard(t, h, boardID, req)
 		if w.Code != 502 {
-			t.Fatalf("bridge down: want 502, got %d %s", w.Code, w.Body.String())
+			t.Fatalf("owner down: want 502, got %d %s", w.Code, w.Body.String())
 		}
 	}
 	// The principal owner is up, so a principal alone still writes.
@@ -311,7 +349,9 @@ func TestADefaultAssigneeDisabledSinceRefusesTheCardBeforeNoteboardIsTouched(t *
 	defer principalServer.Close()
 	bridge := httptest.NewServer(newFakeLLMBridgeServer().handler())
 	defer bridge.Close()
-	h, nb, _, cleanup := setupWithOwners(t, principalServer.URL, bridge.URL)
+	bundles := httptest.NewServer(newFakeBundleStore().handler())
+	defer bundles.Close()
+	h, nb, _, cleanup := setupWithOwners(t, principalServer.URL, bridge.URL, bundles.URL)
 	defer cleanup()
 
 	boardID := mkBoard(t, h, "Stale")

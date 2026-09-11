@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kayushkin/kanban-store/internal/api"
+	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -250,13 +251,15 @@ func setupExposingStore(t *testing.T, principalStoreURL string) (http.Handler, *
 	t.Helper()
 	bridge := httptest.NewServer(newFakeLLMBridgeServer().handler())
 	t.Cleanup(bridge.Close)
-	return setupWithOwners(t, principalStoreURL, bridge.URL)
+	bundles := httptest.NewServer(newFakeBundleStore().handler())
+	t.Cleanup(bundles.Close)
+	return setupWithOwners(t, principalStoreURL, bridge.URL, bundles.URL)
 }
 
 // setupWithOwners is the whole harness with both owner URLs chosen by the
 // test: principal-store for principals, llm-bridge-server for agents and
 // instances. Point either at a closed port to exercise the unreachable path.
-func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL string) (http.Handler, *fakeNoteboard, *db.Store, func()) {
+func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundleStoreURL string) (http.Handler, *fakeNoteboard, *db.Store, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := db.New(filepath.Join(dir, "test.db"))
@@ -265,7 +268,7 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL string)
 	}
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
-	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL))
+	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
 	return a.Handler(), nb, store, func() {
 		srv.Close()
 		store.Close()
