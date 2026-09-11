@@ -420,6 +420,65 @@ a person disabled since the setting was made refuses the card with a 400 that
 names `default_principal_id` rather than filing new work to someone who has
 left.
 
+### Message triggers
+
+A board can send a text message through **multichat** (WhatsApp, Telegram,
+Signal, Meta) when something happens to a card on it — a P0 is created, a card
+lands in Done, a card is resolved. Triggers are board settings, edited on the
+board's settings page; no agent is involved, so a send does not wait for a
+permission prompt.
+
+```sh
+curl -X POST localhost:8305/api/boards/$BOARD/message-triggers -d '{
+  "name":              "P0 created → on-call",
+  "event_kind":        "card_created",
+  "priority_value":    5,
+  "recipient_user_id": "@whatsapp_15551234567:chat.kayushkin.com",
+  "recipient_display_name": "On-call",
+  "message_template":  "{{.PriorityLabel}} on {{.BoardName}}: {{.Title}} ({{.ColumnName}})"}'
+```
+
+| Route | |
+|---|---|
+| `GET`, `POST /api/boards/{id}/message-triggers` | a board's triggers; create one (enabled) |
+| `GET`, `PATCH`, `DELETE /api/message-triggers/{id}` | one trigger; PATCH merges what is sent, `{"enabled":false}` is the off switch, `{"clear_priority":true}` drops the priority filter |
+| `GET /api/boards/{id}/message-deliveries?limit=100` | what the triggers did, newest first |
+| `GET /api/message-trigger-options` | `event_kinds` a trigger may name, `column_filter_event_kinds` (the ones `to_column_id` applies to), `template_fields` a template may use, and `delivery_configured` |
+
+- **`event_kind`** is one of `card_created`, `card_moved`, `card_completed`,
+  `assigned`, `card_held` — served by the options route, never hardcoded in a UI.
+  A card-wide event (`card_completed`, `assigned`) is matched against the
+  triggers of every board the card is on.
+- **`to_column_id`** narrows `card_moved` to moves *into* that column, and must be
+  a column of this board; on any other kind it is a 400.
+- **`priority_value`** is a rung on this board's ladder — the rung's value, not its
+  label, which is renameable. The response carries `priority_label` for display.
+  A value that is not a rung is a 400 naming the rungs.
+- **`recipient_user_id`** is multichat's id for the person, the bridge puppet id from
+  multichat's `GET /api/contacts/unified`. `recipient_display_name` is display only.
+- **`message_template`** is a Go `text/template` over `CardID`, `Title`, `BoardName`,
+  `ColumnName`, `FromColumnName`, `PriorityLabel`, `EventKind`, `Actor`, `Summary`,
+  `AssigneeIDs`, `OccurredAt`. A template that does not parse is a 400; a field it
+  names that does not exist fails at delivery and is recorded as such.
+- Unknown JSON fields are a 400.
+
+**Delivery.** Recording a card event never waits on a message: the event is
+written, the write answers, and the triggers fire in the background. Each
+trigger that matches writes one row to `message_deliveries`, unique on
+`(trigger_id, event_id)` so an event is delivered at most once per trigger:
+`sent` (with multichat's `room_id` and `matrix_event_id`), `failed` (with the
+error — multichat refused, auth-store refused, the template named a missing
+field, the card could not be read), `pending` (claimed and handed to multichat
+with no answer recorded — kanban-store stopped mid-send), or `not_configured`.
+
+**Wiring.** kanban-store calls multichat's `POST /api/messages/send` when
+`MULTICHAT_URL` is set (e.g. `http://localhost:8402`), resolving multichat's
+API token from **auth-store provider `multichat`** on every send via
+`AUTH_STORE_URL` and `AUTH_STORE_TOKEN`; `MULTICHAT_URL` without
+`AUTH_STORE_TOKEN` refuses to start. With `MULTICHAT_URL` unset — the state
+this service ships in — triggers still match and render, and every delivery is
+recorded as `not_configured` with the message it would have sent.
+
 ### Paging a board
 
 Every column carries a `total`, so a client can say *showing 25 of 6,466* rather

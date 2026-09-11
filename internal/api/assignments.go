@@ -96,7 +96,7 @@ func (a *API) assignPrincipal(w http.ResponseWriter, r *http.Request, cardID, pr
 		writeError(w, 500, err.Error())
 		return
 	}
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, Kind: model.EventAssigned, ClockState: state, Actor: actorFrom(r),
 		Summary:    principalID,
 		Detail:     json.RawMessage(fmt.Sprintf(`{"principal_id":%q}`, principalID)),
@@ -118,7 +118,7 @@ func (a *API) unassignPrincipal(w http.ResponseWriter, r *http.Request, cardID, 
 		writeError(w, 500, err.Error())
 		return
 	}
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, Kind: model.EventUnassigned, ClockState: state, Actor: actorFrom(r),
 		Summary: principalID,
 		Detail:  json.RawMessage(fmt.Sprintf(`{"principal_id":%q}`, principalID)),

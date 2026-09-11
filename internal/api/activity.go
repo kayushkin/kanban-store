@@ -16,18 +16,23 @@ import (
 
 // ============================ Recording ============================
 
-// recordEvent appends an action to a card's log and reports the failure rather
+// recordEventAndFireMessageTriggers appends an action to a card's log and reports the failure rather
 // than hiding it: a move that succeeded but went unlogged leaves the card's
 // figures quietly wrong from then on, and a caller that never hears about it
 // cannot know the timeline it later reads is short an entry.
 //
 // The write paths call this after the change they describe has succeeded, so a
 // rejected move never lands in the log as one that happened.
-func (a *API) recordEvent(e *model.CardEvent) error {
-	_, err := a.store.RecordCardEvent(e)
+//
+// A recorded event is also handed to the board's message triggers, which may
+// send a text message through multichat. That runs in the background: the
+// write never waits on it, and its outcome is a delivery row, not this error.
+func (a *API) recordEventAndFireMessageTriggers(e *model.CardEvent) error {
+	stored, err := a.store.RecordCardEvent(e)
 	if err != nil {
 		return fmt.Errorf("record %s event for card %s: %w", e.Kind, e.CardID, err)
 	}
+	a.fireMessageTriggers(stored)
 	return nil
 }
 
@@ -159,6 +164,7 @@ func (a *API) cardEvents(w http.ResponseWriter, r *http.Request, cardID string) 
 			writeError(w, 500, err.Error())
 			return
 		}
+		a.fireMessageTriggers(stored)
 		writeJSON(w, 201, stored)
 	default:
 		writeError(w, 405, "method not allowed")
@@ -204,7 +210,7 @@ func (a *API) cardNotes(w http.ResponseWriter, r *http.Request, cardID string) {
 		if req.ClockState != "" {
 			state = req.ClockState
 		}
-		if err := a.recordEvent(&model.CardEvent{
+		if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 			CardID: cardID, BoardID: req.BoardID, Kind: model.EventNoteAdded, ClockState: state,
 			Actor: req.Actor, Summary: note.Body, NoteID: note.ID, OccurredAt: note.CreatedAt,
 		}); err != nil {
@@ -298,7 +304,7 @@ func (a *API) cardTimeline(w http.ResponseWriter, r *http.Request, cardID string
 			return
 		}
 		if item, err := a.noteboard.GetItem(cardID); err == nil {
-			level = ladder.LevelFor(priorityOfItem(item))
+			level = ladder.LevelFor(model.PriorityOfNoteboardItem(item))
 		}
 	}
 
@@ -308,21 +314,6 @@ func (a *API) cardTimeline(w http.ResponseWriter, r *http.Request, cardID string
 	writeJSON(w, 200, CardTimeline{
 		CardID: cardID, BoardID: boardID, Summary: summary, Entries: entries, Notes: notes, Level: level,
 	})
-}
-
-// priorityOfItem reads the noteboard priority off an opaque item. A missing or
-// unreadable priority is the unranked value, which earns no rung and no limit.
-func priorityOfItem(item map[string]any) int {
-	if item == nil {
-		return model.UnsetPriorityValue
-	}
-	switch v := item["priority"].(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	}
-	return model.UnsetPriorityValue
 }
 
 // ============================ Priority ladder ============================
@@ -440,7 +431,7 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 	for i, p := range placements {
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],
-			Level:  ladder.LevelFor(priorityOfItem(items[i])),
+			Level:  ladder.LevelFor(model.PriorityOfNoteboardItem(items[i])),
 			Hours:  board.BusinessHours,
 			Now:    asOf,
 		})

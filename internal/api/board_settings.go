@@ -143,7 +143,7 @@ func (a *API) applyBoardDefaultAssignee(cardID, principalID, actor string) ([]mo
 	if err != nil {
 		return nil, err
 	}
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, Kind: model.EventAssigned, ClockState: state, Actor: actor,
 		Summary:    principalID,
 		Detail:     json.RawMessage(fmt.Sprintf(`{"principal_id":%q,"source":"board_default"}`, principalID)),

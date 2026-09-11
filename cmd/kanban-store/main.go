@@ -12,6 +12,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
+	"github.com/kayushkin/kanban-store/internal/multichat"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
 )
@@ -44,6 +45,21 @@ func main() {
 	bundleStoreURL := config.BundleStoreURL()
 	nb := noteboard.New(noteboardURL)
 	a := api.New(store, nb, principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
+
+	// Message triggers send through multichat only when MULTICHAT_URL is set.
+	// Without it they still match and render, and each delivery is recorded as
+	// not_configured, so the board's settings page shows them firing into
+	// nothing rather than silently doing nothing.
+	if multichatURL := config.MultichatURL(); multichatURL != "" {
+		authStoreToken := config.AuthStoreToken()
+		if authStoreToken == "" {
+			log.Fatal("MULTICHAT_URL is set but AUTH_STORE_TOKEN is not: message triggers resolve multichat's API token from auth-store provider \"multichat\"")
+		}
+		a.SetMessageSender(multichat.New(multichatURL, multichat.AuthStoreTokenSource(config.AuthStoreURL(), authStoreToken)))
+		log.Printf("message triggers: delivering through multichat at %s (token from auth-store %s)", multichatURL, config.AuthStoreURL())
+	} else {
+		log.Printf("message triggers: MULTICHAT_URL is not set; matching triggers are recorded as not_configured and nothing is sent")
+	}
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s, llm-bridge-server: %s, bundle-store: %s)",

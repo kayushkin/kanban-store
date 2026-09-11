@@ -13,6 +13,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
+	"github.com/kayushkin/kanban-store/internal/messaging"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
@@ -31,10 +32,13 @@ type API struct {
 	bridge *llmbridge.Client
 	// bundles is consulted on one write: setting a board's default bundle.
 	bundles *bundlestore.Client
+	// messages fires the board's message triggers after a card event is
+	// recorded. It has no sender until SetMessageSender is called.
+	messages *messaging.Dispatcher
 }
 
 func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client) *API {
-	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge, bundles: bundles}
+	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge, bundles: bundles, messages: messaging.NewDispatcher(store, nb)}
 }
 
 func (a *API) Handler() http.Handler {
@@ -44,6 +48,10 @@ func (a *API) Handler() http.Handler {
 	// boards
 	mux.HandleFunc("/api/boards", a.boards)
 	mux.HandleFunc("/api/boards/", a.boardsTree)
+
+	// message triggers (single-trigger ops; a board's list is under /api/boards/:id)
+	mux.HandleFunc("/api/message-triggers/", a.messageTriggerByID)
+	mux.HandleFunc("/api/message-trigger-options", a.messageTriggerOptions)
 
 	// columns (single-resource ops, and a column's cards a page at a time)
 	mux.HandleFunc("/api/columns/", a.columnScoped)
@@ -188,6 +196,16 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 	case "priority-levels":
 		if len(parts) == 2 {
 			a.boardPriorityLevels(w, r, boardID)
+			return
+		}
+	case "message-triggers":
+		if len(parts) == 2 {
+			a.boardMessageTriggers(w, r, boardID)
+			return
+		}
+	case "message-deliveries":
+		if len(parts) == 2 {
+			a.boardMessageDeliveries(w, r, boardID)
 			return
 		}
 	}
@@ -412,7 +430,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			mapDBErr(w, err)
 			return
 		}
-		if err := a.recordEvent(&model.CardEvent{
+		if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 			CardID: cardID, BoardID: boardID, Kind: model.EventCardAttached,
 			ClockState: a.clockStateForColumn(cardID, boardID, req.ColumnID),
 			Actor:      actorFrom(r), ToColumnID: req.ColumnID,
@@ -432,7 +450,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 		}
 		// The card left this board, so its clock on this board stops. The log stays:
 		// a card that was here and went is part of what happened.
-		if err := a.recordEvent(&model.CardEvent{
+		if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 			CardID: cardID, BoardID: boardID, Kind: model.EventCardDetached,
 			ClockState: model.ClockStopped, Actor: actorFrom(r),
 		}); err != nil {
@@ -519,7 +537,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 	// The card's clock starts here. A card created straight into a column that
 	// stops the clock (a classifier filing already-handled mail under "No action")
 	// is born finished, and says so.
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, BoardID: boardID, Kind: model.EventCardCreated,
 		ClockState: a.clockStateForColumn(cardID, boardID, req.ColumnID),
 		Actor:      actorFrom(r), Summary: req.Title, ToColumnID: req.ColumnID,
@@ -648,7 +666,7 @@ func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, ho
 	if hold {
 		kind, state = model.EventCardHeld, model.ClockPaused
 	}
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, Kind: kind, ClockState: state, Actor: actorFrom(r), Summary: holdReason,
 	}); err != nil {
 		writeError(w, 500, err.Error())
@@ -674,7 +692,7 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 		// Completing a card stops its clock, however the completion was expressed —
 		// dragged into a Done column, or patched straight to done from anywhere.
 		if status, ok := patch["status"].(string); ok && (status == "done" || status == "archived") {
-			if err := a.recordEvent(&model.CardEvent{
+			if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 				CardID: cardID, Kind: model.EventCardCompleted, ClockState: model.ClockStopped,
 				Actor: actorFrom(r), Summary: status,
 			}); err != nil {
@@ -742,7 +760,7 @@ func (a *API) moveCard(w http.ResponseWriter, r *http.Request, cardID string) {
 	if current != nil {
 		fromColumn = current.ColumnID
 	}
-	if err := a.recordEvent(&model.CardEvent{
+	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, BoardID: req.BoardID, Kind: model.EventCardMoved,
 		ClockState:   a.clockStateForColumn(cardID, req.BoardID, req.ColumnID),
 		Actor:        actorFrom(r),
@@ -828,7 +846,7 @@ func (a *API) cardLinks(w http.ResponseWriter, r *http.Request, cardID string) {
 			if req.OccurredAt != nil {
 				occurred = *req.OccurredAt
 			}
-			if err := a.recordEvent(&model.CardEvent{
+			if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 				CardID: cardID, Kind: kind, ClockState: state, Actor: actorFrom(r),
 				Summary: l.Label, OccurredAt: occurred,
 				Detail: json.RawMessage(fmt.Sprintf(`{"entity_type":%q,"entity_ref":%q}`, req.EntityType, req.EntityRef)),
@@ -1110,7 +1128,7 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 		}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],
-			Level:  ladder.LevelFor(priorityOfItem(items[i])),
+			Level:  ladder.LevelFor(model.PriorityOfNoteboardItem(items[i])),
 			Hours:  b.BusinessHours,
 			Now:    asOf,
 		})
