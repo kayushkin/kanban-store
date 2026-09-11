@@ -34,9 +34,8 @@ type Board struct {
 	DefaultInstanceID string `json:"default_instance_id,omitempty"`
 	// DefaultBundleID is bundle-store's numeric id for the session bundle
 	// (skills and tools) a dispatcher spawns with for this board's cards.
-	// Stored and checked here; ⚠️ as of 2026-09-11 llm-bridge-server's
-	// POST /sessions takes no bundle, so nothing applies it yet — it is shown
-	// and read, not enforced.
+	// Stored and checked here; the dispatcher sends it as bundle_id on
+	// llm-bridge-server's POST /sessions, which resolves and provisions it.
 	DefaultBundleID string `json:"default_bundle_id,omitempty"`
 	// Classifier says how mail becomes cards on this board. Absent means no
 	// classifier files onto it. The scheduler still owns WHEN the classifier
