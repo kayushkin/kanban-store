@@ -193,9 +193,23 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 			a.boardCardByID(w, r, boardID, parts[2])
 			return
 		}
+		if len(parts) == 4 && parts[3] == "effective-defaults" {
+			a.cardEffectiveDefaults(w, r, boardID, parts[2])
+			return
+		}
 	case "priority-levels":
 		if len(parts) == 2 {
 			a.boardPriorityLevels(w, r, boardID)
+			return
+		}
+	case "tag-rules":
+		if len(parts) == 2 {
+			a.boardTagRules(w, r, boardID)
+			return
+		}
+	case "effective-defaults":
+		if len(parts) == 2 {
+			a.boardEffectiveDefaults(w, r, boardID)
 			return
 		}
 	case "message-triggers":
@@ -411,16 +425,23 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 400, err.Error())
 			return
 		}
-		// Verify the card actually exists in noteboard.
-		if _, err := a.noteboard.GetItem(cardID); err != nil {
+		// Verify the card actually exists in noteboard, and read its tags: a
+		// tag rule may name who the card goes to on this board.
+		item, err := a.noteboard.GetItem(cardID)
+		if err != nil {
 			writeError(w, 404, "noteboard item not found: "+cardID)
+			return
+		}
+		cardTags, err := tagsOfNoteboardItem(item)
+		if err != nil {
+			writeError(w, 502, err.Error())
 			return
 		}
 		if err := a.checkWIP(req.ColumnID); err != nil {
 			writeError(w, 409, err.Error())
 			return
 		}
-		defaultAssignee, err := a.boardDefaultAssigneeFor(boardID)
+		defaultAssignee, err := a.defaultAssigneeOnArrival(boardID, cardTags)
 		if err != nil {
 			writeSettingsCheckFailure(w, err)
 			return
@@ -438,7 +459,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 500, err.Error())
 			return
 		}
-		if _, err := a.applyBoardDefaultAssignee(cardID, defaultAssignee, actorFrom(r)); err != nil {
+		if _, err := a.applyDefaultAssignee(cardID, defaultAssignee, actorFrom(r)); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
@@ -486,7 +507,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 409, err.Error())
 		return
 	}
-	defaultAssignee, err := a.boardDefaultAssigneeFor(boardID)
+	defaultAssignee, err := a.defaultAssigneeOnArrival(boardID, req.Tags)
 	if err != nil {
 		writeSettingsCheckFailure(w, err)
 		return
@@ -545,7 +566,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
-	assignments, err := a.applyBoardDefaultAssignee(cardID, defaultAssignee, actorFrom(r))
+	assignments, err := a.applyDefaultAssignee(cardID, defaultAssignee, actorFrom(r))
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

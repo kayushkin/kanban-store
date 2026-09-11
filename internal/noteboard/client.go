@@ -186,6 +186,10 @@ type notFoundError struct{ id string }
 
 func (e *notFoundError) Error() string { return "noteboard item not found: " + e.id }
 
+// IsNotFound reports whether err is noteboard answering that the item does
+// not exist, as opposed to noteboard failing to answer.
+func IsNotFound(err error) bool { return isNotFound(err) }
+
 func isNotFound(err error) bool {
 	_, ok := err.(*notFoundError)
 	return ok

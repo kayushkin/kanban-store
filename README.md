@@ -103,6 +103,9 @@ All request and response bodies are JSON.
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
 | `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier` — see [Board settings](#board-settings) |
+| `GET` `PUT` | `/api/boards/{id}/tag-rules` | The board's ordered tag rules — see [Tag rules](#tag-rules) |
+| `GET` | `/api/boards/{id}/effective-defaults?tag=…&tag=…` | What a card carrying these tags gets on this board, each default with its source |
+| `GET` | `/api/boards/{id}/cards/{card_id}/effective-defaults` | The same, with the card's tags read from noteboard |
 | `DELETE` | `/api/boards/{id}` | |
 
 ### Columns
@@ -478,6 +481,54 @@ API token from **auth-store provider `multichat`** on every send via
 `AUTH_STORE_TOKEN` refuses to start. With `MULTICHAT_URL` unset — the state
 this service ships in — triggers still match and render, and every delivery is
 recorded as `not_configured` with the message it would have sent.
+
+### Tag rules
+
+A board's tag rules override its defaults for cards carrying particular tags —
+the card's noteboard tags, matched exactly:
+
+```sh
+curl -X PUT localhost:8305/api/boards/$BOARD/tag-rules -d '{"rules":[
+  {"tags":["cat:product","urgency:high"], "default_instance_id":"inst-cc-local"},
+  {"tags":["cat:product"], "default_bundle_id":"6", "default_agent_id":"12"}]}'
+```
+
+- **A rule matches a card that carries every tag it names.** `["cat:product","urgency:high"]`
+  does not match a card tagged only `cat:product`.
+- **Order decides, per field.** For each of `default_principal_id`, `default_agent_id`,
+  `default_instance_id` and `default_bundle_id`, the first matching rule that sets it
+  wins; a field it leaves blank falls through to the next matching rule, and past the
+  last to the board's own default. Above, a card tagged `cat:product` and `urgency:high`
+  runs on `inst-cc-local` (first rule) with bundle `6` and agent `12` (second rule).
+- **PUT replaces the whole list, in order.** Send a rule's `id` back to keep it (and its
+  `created_at`); omit it to create one. `[]` removes every rule.
+- Refused with a **400**: a rule with no tags, a tag with surrounding whitespace, a tag
+  named twice, two rules with the same tag set (merge them), a rule setting no default,
+  an `id` that is not one of this board's rules, and any unknown JSON key. Every id a
+  rule names is checked with its owner exactly as the board's own defaults are — 400
+  naming `rules[i]` and its tags when the owner says no, 502 when it cannot answer —
+  and nothing is written.
+
+**The resolution lives here and nowhere else.** Ask for it rather than re-implementing it:
+
+```sh
+curl "localhost:8305/api/boards/$BOARD/cards/$CARD/effective-defaults"
+{"board_id":"…","card_id":"…","tags":["cat:product","urgency:high"],
+ "matched_rule_ids":["…","…"],
+ "defaults":{
+   "default_instance_id":{"value":"inst-cc-local","source":{"kind":"tag_rule","rule_id":"…","rule_tags":["cat:product","urgency:high"],"rule_position":0}},
+   "default_bundle_id":{"value":"6","source":{"kind":"tag_rule","rule_id":"…","rule_tags":["cat:product"],"rule_position":1}},
+   "default_agent_id":{"value":"12","source":{"kind":"tag_rule","rule_id":"…","rule_tags":["cat:product"],"rule_position":1}}}}
+```
+
+A default absent from `defaults` has no value anywhere. `GET
+/api/boards/{id}/effective-defaults?tag=…&tag=…` answers the same for a tag list
+without reading a card.
+
+**A rule's principal applies on arrival only**, like the board's: when a card is created
+on or attached to the board with no assignee, the resolved principal goes on it, and the
+`assigned` event's detail says `"source":"tag_rule"` with the `rule_id` and `rule_tags`
+(or `"source":"board_default"`). A tag added to a card later assigns nobody.
 
 ### Paging a board
 

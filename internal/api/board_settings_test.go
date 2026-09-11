@@ -20,11 +20,12 @@ import (
 type fakeLLMBridgeServer struct{}
 
 const (
-	knownAgentID      = "17"
-	knownAgentSlug    = "agent-dashboard"
-	unknownAgentID    = "9999"
-	knownInstanceID   = "inst-test"
-	unknownInstanceID = "inst-nope"
+	knownAgentID         = "17"
+	knownAgentSlug       = "agent-dashboard"
+	unknownAgentID       = "9999"
+	knownInstanceID      = "inst-test"
+	otherKnownInstanceID = "inst-other"
+	unknownInstanceID    = "inst-nope"
 )
 
 func newFakeLLMBridgeServer() *fakeLLMBridgeServer { return &fakeLLMBridgeServer{} }
@@ -38,12 +39,13 @@ func (f *fakeLLMBridgeServer) handler() http.Handler {
 		})
 	})
 	mux.HandleFunc("GET /instances/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if r.PathValue("id") != knownInstanceID {
+		id := r.PathValue("id")
+		if id != knownInstanceID && id != otherKnownInstanceID {
 			w.WriteHeader(404)
 			w.Write([]byte("instance not found"))
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": knownInstanceID, "harness_type": "claude_code"})
+		writeJSON(w, 200, map[string]any{"id": id, "harness_type": "claude_code"})
 	})
 	return mux
 }

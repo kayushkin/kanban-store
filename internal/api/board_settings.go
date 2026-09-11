@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
@@ -95,44 +96,53 @@ func writeSettingsCheckFailure(w http.ResponseWriter, err error) {
 	writeError(w, 500, err.Error())
 }
 
-// boardDefaultAssigneeFor answers which principal a card arriving on the board
-// should be handed to: the board's default, re-checked with principal-store
-// now rather than trusted from the day it was set, because a principal
-// disabled since then must not be put on new work. Empty when the board has
-// no default. The check runs BEFORE the card is created, so a default that has
-// gone bad refuses the card loudly instead of leaving a noteboard item behind
-// with no placement.
-func (a *API) boardDefaultAssigneeFor(boardID string) (string, error) {
-	board, err := a.store.GetBoard(boardID)
+// defaultAssigneeOnArrival answers which principal a card arriving on the board
+// should be handed to: the first matching tag rule that names one, else the
+// board's default — resolved by model.ResolveEffectiveDefaults with the card's
+// tags. The choice is re-checked with principal-store now rather than trusted
+// from the day it was set, because a principal disabled since then must not be
+// put on new work. Nil when nothing names a principal. The check runs BEFORE
+// the card is created, so a default that has gone bad refuses the card loudly
+// instead of leaving a noteboard item behind with no placement.
+func (a *API) defaultAssigneeOnArrival(boardID string, cardTags []string) (*model.EffectiveDefault, error) {
+	resolved, err := a.effectiveDefaultsFor(boardID, cardTags)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if board.DefaultPrincipalID == "" {
-		return "", nil
+	chosen, named := resolved.Defaults[model.DefaultFieldPrincipal]
+	if !named {
+		return nil, nil
 	}
-	if err := a.checkPrincipalIsAssignable(board.DefaultPrincipalID); err != nil {
+	if err := a.checkPrincipalIsAssignable(chosen.Value); err != nil {
 		var failure *settingsCheckFailure
 		if errors.As(err, &failure) {
-			return "", &settingsCheckFailure{failure.status, fmt.Sprintf("board %s default assignee cannot be applied — %s; clear or change the board's default_principal_id", boardID, failure.message)}
+			where := fmt.Sprintf("board %s default assignee", boardID)
+			fix := "clear or change the board's default_principal_id"
+			if chosen.Source.Kind == model.DefaultSourceTagRule {
+				where = fmt.Sprintf("board %s tag rule %s (tags %s) default assignee", boardID, chosen.Source.RuleID, strings.Join(chosen.Source.RuleTags, " + "))
+				fix = fmt.Sprintf("change that rule's default_principal_id with PUT /api/boards/%s/tag-rules", boardID)
+			}
+			return nil, &settingsCheckFailure{failure.status, fmt.Sprintf("%s cannot be applied — %s; %s", where, failure.message, fix)}
 		}
-		return "", err
+		return nil, err
 	}
-	return board.DefaultPrincipalID, nil
+	return &chosen, nil
 }
 
-// applyBoardDefaultAssignee puts the board's default principal on the card,
-// unless someone is already on it — a default fills a blank, it never
-// overrides an assignment a person made. Returns the assignments the card
+// applyDefaultAssignee puts the chosen default principal on the card, unless
+// someone is already on it — a default fills a blank, it never overrides an
+// assignment a person made. The assigned event says where the choice came
+// from: the board, or which tag rule. Returns the assignments the card
 // carries afterwards, for the card view the caller answers with.
-func (a *API) applyBoardDefaultAssignee(cardID, principalID, actor string) ([]model.CardAssignment, error) {
+func (a *API) applyDefaultAssignee(cardID string, chosen *model.EffectiveDefault, actor string) ([]model.CardAssignment, error) {
 	existing, err := a.store.ListCardAssignments(cardID)
 	if err != nil {
 		return nil, err
 	}
-	if principalID == "" || len(existing) > 0 {
+	if chosen == nil || len(existing) > 0 {
 		return existing, nil
 	}
-	assignment, created, err := a.store.AssignPrincipalToCard(cardID, principalID, actor)
+	assignment, created, err := a.store.AssignPrincipalToCard(cardID, chosen.Value, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -143,10 +153,20 @@ func (a *API) applyBoardDefaultAssignee(cardID, principalID, actor string) ([]mo
 	if err != nil {
 		return nil, err
 	}
+	detail := map[string]any{"principal_id": chosen.Value, "source": "board_default"}
+	if chosen.Source.Kind == model.DefaultSourceTagRule {
+		detail["source"] = "tag_rule"
+		detail["rule_id"] = chosen.Source.RuleID
+		detail["rule_tags"] = chosen.Source.RuleTags
+	}
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		return nil, err
+	}
 	if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 		CardID: cardID, Kind: model.EventAssigned, ClockState: state, Actor: actor,
-		Summary:    principalID,
-		Detail:     json.RawMessage(fmt.Sprintf(`{"principal_id":%q,"source":"board_default"}`, principalID)),
+		Summary:    chosen.Value,
+		Detail:     json.RawMessage(detailJSON),
 		OccurredAt: assignment.CreatedAt,
 	}); err != nil {
 		return nil, err

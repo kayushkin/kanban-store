@@ -22,15 +22,17 @@ type fakePrincipalStore struct {
 }
 
 const (
-	activePrincipal   = "principal_000001"
-	disabledPrincipal = "principal_000002"
-	unknownPrincipal  = "principal_000099"
+	activePrincipal      = "principal_000001"
+	otherActivePrincipal = "principal_000003"
+	disabledPrincipal    = "principal_000002"
+	unknownPrincipal     = "principal_000099"
 )
 
 func newFakePrincipalStore() *fakePrincipalStore {
 	return &fakePrincipalStore{disabledAtByID: map[string]int64{
-		activePrincipal:   0,
-		disabledPrincipal: 1_757_000_000,
+		activePrincipal:      0,
+		otherActivePrincipal: 0,
+		disabledPrincipal:    1_757_000_000,
 	}}
 }
 

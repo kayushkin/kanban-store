@@ -43,6 +43,9 @@ func New(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateBoardTagRules(db); err != nil {
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
