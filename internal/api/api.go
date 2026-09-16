@@ -35,6 +35,9 @@ type API struct {
 	// messages fires the board's message triggers after a card event is
 	// recorded. It has no sender until SetMessageSender is called.
 	messages *messaging.Dispatcher
+	// principalEnforcement is nil unless SetPrincipalEnforcement was called;
+	// see principal_access.go.
+	principalEnforcement *PrincipalEnforcement
 }
 
 func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client) *API {
@@ -78,14 +81,14 @@ func (a *API) Handler() http.Handler {
 	// search delegate
 	mux.HandleFunc("/api/search", a.search)
 
-	return cors(mux)
+	return cors(a.principalGate(mux))
 }
 
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+PrincipalIDHeader)
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
 			return
@@ -132,6 +135,16 @@ func (a *API) boards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, err.Error())
 			return
 		}
+		if access := principalBoardAccessFrom(r); access != nil {
+			viewable := access.ViewableBoardIDs()
+			visible := boards[:0]
+			for _, board := range boards {
+				if viewable[board.ID] {
+					visible = append(visible, board)
+				}
+			}
+			boards = visible
+		}
 		writeJSON(w, 200, boards)
 	case "POST":
 		var req model.CreateBoardRequest
@@ -147,6 +160,19 @@ func (a *API) boards(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
+		}
+		if access := principalBoardAccessFrom(r); access != nil {
+			// A principal who creates a board administers it. Without that grant
+			// the board would be invisible to the one who made it, so a failed
+			// grant undoes the board rather than leaving it orphaned.
+			if err := a.principalEnforcement.Grants.GrantBoardAdministration(access.PrincipalID, b.ID); err != nil {
+				if deleteErr := a.store.DeleteBoard(b.ID); deleteErr != nil {
+					writeError(w, 500, fmt.Sprintf("board %s was created, granting its creator can_administer failed (%v), and deleting it again also failed: %v", b.ID, err, deleteErr))
+					return
+				}
+				writeError(w, 502, "board not created: could not give its creator can_administer: "+err.Error())
+				return
+			}
 		}
 		writeJSON(w, 201, b)
 	default:
@@ -849,6 +875,15 @@ func (a *API) cardPlacements(w http.ResponseWriter, r *http.Request, cardID stri
 		writeError(w, 500, err.Error())
 		return
 	}
+	if access := principalBoardAccessFrom(r); access != nil {
+		visible := ps[:0]
+		for _, placement := range ps {
+			if access.LevelOn(placement.BoardID) >= BoardAccessView {
+				visible = append(visible, placement)
+			}
+		}
+		ps = visible
+	}
 	writeJSON(w, 200, ps)
 }
 
@@ -961,6 +996,20 @@ func (a *API) entityScoped(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
+		}
+		if access := principalBoardAccessFrom(r); access != nil {
+			visibleIDs := ids[:0]
+			for _, id := range ids {
+				visible, err := a.cardVisibleTo(access, id)
+				if err != nil {
+					writeError(w, 500, err.Error())
+					return
+				}
+				if visible {
+					visibleIDs = append(visibleIDs, id)
+				}
+			}
+			ids = visibleIDs
 		}
 		items, err := a.noteboard.GetItems(ids)
 		if err != nil {
@@ -1078,6 +1127,12 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 	}
 	boardID := q.Get("board_id")
 	onBoard := q.Get("on_board") == "true"
+	access := principalBoardAccessFrom(r)
+	if access != nil {
+		// A principal searches only cards on boards it can view, so the filter
+		// below always runs; a named board it cannot view matches nothing.
+		onBoard = true
+	}
 	if boardID == "" && !onBoard {
 		writeJSON(w, 200, items)
 		return
@@ -1097,6 +1152,9 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		}
 		match := false
 		for _, p := range ps {
+			if access != nil && access.LevelOn(p.BoardID) < BoardAccessView {
+				continue
+			}
 			if boardID != "" && p.BoardID == boardID {
 				match = true
 				break

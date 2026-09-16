@@ -11,6 +11,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/grantstore"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/multichat"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
@@ -59,6 +60,20 @@ func main() {
 		log.Printf("message triggers: delivering through multichat at %s (token from auth-store %s)", multichatURL, config.AuthStoreURL())
 	} else {
 		log.Printf("message triggers: MULTICHAT_URL is not set; matching triggers are recorded as not_configured and nothing is sent")
+	}
+
+	enforcement, err := config.ReadPrincipalEnforcementSettings()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if enforcement.Enabled {
+		a.SetPrincipalEnforcement(api.PrincipalEnforcement{
+			ServiceToken: enforcement.ServiceToken,
+			Grants:       grantstore.New(enforcement.GrantStoreURL),
+		})
+		log.Printf("principal enforcement: on; board grants read from grant-store at %s; requests need X-Principal-Id or the service token", enforcement.GrantStoreURL)
+	} else {
+		log.Printf("principal enforcement: off; every request sees every board")
 	}
 
 	addr := fmt.Sprintf(":%s", port)

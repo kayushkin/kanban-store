@@ -150,5 +150,19 @@ func (a *API) assignmentsByPrincipal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	if access := principalBoardAccessFrom(r); access != nil {
+		visible := assignments[:0]
+		for _, assignment := range assignments {
+			cardVisible, err := a.cardVisibleTo(access, assignment.CardID)
+			if err != nil {
+				writeError(w, 500, err.Error())
+				return
+			}
+			if cardVisible {
+				visible = append(visible, assignment)
+			}
+		}
+		assignments = visible
+	}
 	writeJSON(w, 200, assignments)
 }

@@ -627,3 +627,46 @@ compiles green and panics at boot.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Principal enforcement (who may see which board)
+
+Off unless `KANBAN_STORE_PRINCIPAL_ENFORCEMENT=required`. It is off on the host
+this store was built on, where one operator owns every board. Turning it on
+needs two more settings, neither of which has a default:
+
+| Variable | Meaning |
+|---|---|
+| `KANBAN_STORE_SERVICE_TOKEN` | at least 32 characters; internal services send it as `X-Kanban-Store-Service-Token` and are unrestricted |
+| `GRANT_STORE_URL` | where board grants are read, once per request |
+
+With it on, every request except `/health` and `OPTIONS` must carry either the
+service token or `X-Principal-Id`; anything else is **401**. The principal id is
+trusted as sent, so **users must never reach this store except through a
+gateway** that removes any `X-Principal-Id` or service token the client sent and
+sets its own from a verified login (llm-bridge-server's demo login does this).
+grant-store must be given the same token as `KANBAN_STORE_SERVICE_TOKEN`, or it
+cannot check that a board exists before granting on it.
+
+Access is per board, from grant-store's `can_view`, `can_edit` and
+`can_administer` (each includes the one before it; groups are expanded by
+grant-store):
+
+- **Boards**: listing shows only boards the principal can view. Reading a board,
+  its columns, cards, ladder, tag rules and defaults needs `can_view`; creating,
+  moving, attaching or detaching cards needs `can_edit`; changing the board, its
+  columns, ladder or tag rules, and anything about message triggers, needs
+  `can_administer`. A principal who creates a board is granted `can_administer`
+  on it; if that grant fails the board is deleted again and the answer is 502.
+- **Cards**: visible when on at least one board the principal can view;
+  changeable only with `can_edit` on **every** board the card sits on, because
+  the content is one noteboard item shared by all of them. Attaching an existing
+  item needs it to be a card the principal can already see.
+- **Lists** (`/api/search`, `/api/assignments`, `/api/entities/*/cards`, a card's
+  placements) are filtered to what the principal can see.
+- A board or card the principal cannot view is **404**, the same as one that does
+  not exist. One it can view but not change enough is **403**.
+- The event log's actor is the principal, whatever `?actor=` says.
+- Entity tags and `/api/tags` span every board and are **403** for principals.
+- Any route without a rule in `internal/api/principal_access.go` is **403**, so a
+  new route stays closed until someone decides who may use it.
+- grant-store unreachable is **502**; nothing is served on a guess.

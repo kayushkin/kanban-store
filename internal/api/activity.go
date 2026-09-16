@@ -125,7 +125,13 @@ func clockStateForEntityLink(entityType string) (model.EventKind, model.ClockSta
 // actorFrom reads who is acting from the request. Clients that do not say stay
 // anonymous — an empty actor is an honest "we were not told", where a guess from
 // the user agent would put a name on the timeline that nobody typed.
+// actorFrom names who made a change for the event log. Under principal
+// enforcement it is the calling principal, whatever ?actor= says, so the log
+// cannot be written in someone else's name.
 func actorFrom(r *http.Request) string {
+	if access := principalBoardAccessFrom(r); access != nil {
+		return access.PrincipalID
+	}
 	return r.URL.Query().Get("actor")
 }
 
