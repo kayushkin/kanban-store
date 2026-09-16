@@ -638,6 +638,7 @@ needs two more settings, neither of which has a default:
 |---|---|
 | `KANBAN_STORE_SERVICE_TOKEN` | at least 32 characters; internal services send it as `X-Kanban-Store-Service-Token` and are unrestricted |
 | `GRANT_STORE_URL` | where board grants are read, once per request |
+| `GRANT_STORE_SERVICE_TOKEN` | sent to grant-store as `X-Grant-Store-Service-Token`; required when grant-store itself enforces principals, or every principal request is a 502 |
 
 With it on, every request except `/health` and `OPTIONS` must carry either the
 service token or `X-Principal-Id`; anything else is **401**. The principal id is

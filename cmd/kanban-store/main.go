@@ -69,9 +69,9 @@ func main() {
 	if enforcement.Enabled {
 		a.SetPrincipalEnforcement(api.PrincipalEnforcement{
 			ServiceToken: enforcement.ServiceToken,
-			Grants:       grantstore.New(enforcement.GrantStoreURL),
+			Grants:       grantstore.New(enforcement.GrantStoreURL, enforcement.GrantStoreServiceToken),
 		})
-		log.Printf("principal enforcement: on; board grants read from grant-store at %s; requests need X-Principal-Id or the service token", enforcement.GrantStoreURL)
+		log.Printf("principal enforcement: on; board grants read from grant-store at %s (grant-store service token set: %t); requests need X-Principal-Id or the service token", enforcement.GrantStoreURL, enforcement.GrantStoreServiceToken != "")
 	} else {
 		log.Printf("principal enforcement: off; every request sees every board")
 	}

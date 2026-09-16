@@ -33,16 +33,31 @@ const (
 	ResourceTypeBoard     = "board"
 )
 
+// ServiceTokenHeader is where grant-store reads its service token.
+const ServiceTokenHeader = "X-Grant-Store-Service-Token"
+
 // Client talks to one grant-store.
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// ServiceToken is sent on every call when set. kanban-store reads grants as
+	// itself, not as the user, and a grant-store that enforces principals
+	// answers 401 without it — which surfaces as a 502 here, never as no grants.
+	ServiceToken string
 }
 
 // New returns a client with a 3-second timeout, the same budget kanban-store
-// gives its other owner checks.
-func New(baseURL string) *Client {
-	return &Client{BaseURL: strings.TrimSuffix(baseURL, "/"), HTTP: &http.Client{Timeout: 3 * time.Second}}
+// gives its other owner checks. serviceToken may be empty for a grant-store
+// that does not enforce principals.
+func New(baseURL, serviceToken string) *Client {
+	return &Client{BaseURL: strings.TrimSuffix(baseURL, "/"), HTTP: &http.Client{Timeout: 3 * time.Second}, ServiceToken: serviceToken}
+}
+
+func (c *Client) send(request *http.Request) (*http.Response, error) {
+	if c.ServiceToken != "" {
+		request.Header.Set(ServiceTokenHeader, c.ServiceToken)
+	}
+	return c.HTTP.Do(request)
 }
 
 // ErrPrincipalNotFound is grant-store answering 404 for the principal: the id
@@ -60,7 +75,11 @@ type BoardGrant struct {
 // directly or through a group.
 func (c *Client) EffectiveBoardGrants(principalID string) ([]BoardGrant, error) {
 	requestURL := c.BaseURL + "/principals/" + url.PathEscape(principalID) + "/effective?resource_type=" + ResourceTypeBoard
-	response, err := c.HTTP.Get(requestURL)
+	request, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.send(request)
 	if err != nil {
 		return nil, fmt.Errorf("grant-store did not answer GET %s: %w", requestURL, err)
 	}
@@ -98,7 +117,12 @@ func (c *Client) GrantBoardAdministration(principalID, boardID string) error {
 		return err
 	}
 	requestURL := c.BaseURL + "/grants"
-	response, err := c.HTTP.Post(requestURL, "application/json", bytes.NewReader(payload))
+	request, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.send(request)
 	if err != nil {
 		return fmt.Errorf("grant-store did not answer POST %s: %w", requestURL, err)
 	}

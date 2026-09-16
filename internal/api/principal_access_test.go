@@ -42,6 +42,10 @@ func (f *fakeGrantStore) give(principalID, relation, boardID string) {
 func (f *fakeGrantStore) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /principals/{id}/effective", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(grantstore.ServiceTokenHeader) != "grant-store-token" {
+			writeJSON(w, 401, map[string]string{"error": "no grant-store service token"})
+			return
+		}
 		if r.URL.Query().Get("resource_type") != "board" {
 			writeJSON(w, 400, map[string]string{"error": "test fake only serves resource_type=board"})
 			return
@@ -60,6 +64,10 @@ func (f *fakeGrantStore) handler() http.Handler {
 		writeJSON(w, 200, out)
 	})
 	mux.HandleFunc("POST /grants", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(grantstore.ServiceTokenHeader) != "grant-store-token" {
+			writeJSON(w, 401, map[string]string{"error": "no grant-store service token"})
+			return
+		}
 		var request map[string]string
 		json.NewDecoder(r.Body).Decode(&request)
 		f.mu.Lock()
@@ -94,7 +102,7 @@ func setupWithPrincipalEnforcement(t *testing.T) (http.Handler, *fakeGrantStore,
 	notes := httptest.NewServer(newFakeNoteboard().handler())
 	t.Cleanup(notes.Close)
 	a := api.New(store, noteboard.New(notes.URL), principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL))
-	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(grantServer.URL)})
+	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(grantServer.URL, "grant-store-token")})
 	return a.Handler(), grants, store
 }
 
@@ -357,6 +365,6 @@ func TestGrantStoreDownRefusesRatherThanServing(t *testing.T) {
 	closedURL := closed.URL
 	closed.Close()
 	a := api.New(store, noteboard.New(closedURL), principalstore.New(closedURL), llmbridge.New(closedURL), bundlestore.New(closedURL))
-	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(closedURL)})
+	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(closedURL, "")})
 	mustStatus(t, requestAs(t, a.Handler(), asPrincipal(alice), "GET", "/api/boards", nil), 502, "grant-store unreachable")
 }

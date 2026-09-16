@@ -11,6 +11,9 @@ type PrincipalEnforcementSettings struct {
 	Enabled       bool
 	ServiceToken  string
 	GrantStoreURL string
+	// GrantStoreServiceToken is sent to grant-store; empty is right only for a
+	// grant-store that does not enforce principals.
+	GrantStoreServiceToken string
 }
 
 // PrincipalEnforcementRequiredValue is the one value that turns enforcement on.
@@ -30,9 +33,10 @@ func ReadPrincipalEnforcementSettings() (PrincipalEnforcementSettings, error) {
 		return PrincipalEnforcementSettings{}, fmt.Errorf("KANBAN_STORE_PRINCIPAL_ENFORCEMENT=%q: leave it unset for no enforcement or set it to %q", value, PrincipalEnforcementRequiredValue)
 	}
 	settings := PrincipalEnforcementSettings{
-		Enabled:       true,
-		ServiceToken:  os.Getenv("KANBAN_STORE_SERVICE_TOKEN"),
-		GrantStoreURL: os.Getenv("GRANT_STORE_URL"),
+		Enabled:                true,
+		ServiceToken:           os.Getenv("KANBAN_STORE_SERVICE_TOKEN"),
+		GrantStoreURL:          os.Getenv("GRANT_STORE_URL"),
+		GrantStoreServiceToken: os.Getenv("GRANT_STORE_SERVICE_TOKEN"),
 	}
 	if len(settings.ServiceToken) < 32 {
 		return settings, fmt.Errorf("KANBAN_STORE_PRINCIPAL_ENFORCEMENT=required needs KANBAN_STORE_SERVICE_TOKEN of at least 32 characters")
