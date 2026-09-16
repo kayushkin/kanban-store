@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -254,6 +255,13 @@ type BoardPriorityLevel struct {
 	// BudgetSeconds is the time limit for work at this rung, measured on the
 	// budget clock. Nil means this rung is named but not timed.
 	BudgetSeconds *int `json:"budget_seconds"`
+	// DefaultAutoHoldAtUSD is the spend ceiling a card is GIVEN when it lands on
+	// this rung — a starting value written onto the card's noteboard
+	// auto_hold_at_usd, which stays editable per card. It is not enforced from
+	// here: the scheduler's spend-ceiling-guard reads the card, never the ladder.
+	// Nil means this rung suggests no ceiling. Zero is a real default ("stop
+	// before spending a cent"), hence the pointer.
+	DefaultAutoHoldAtUSD *float64 `json:"default_auto_hold_at_usd"`
 }
 
 // PriorityLadder is a board's whole ladder, top rung first. An empty ladder means
@@ -307,6 +315,9 @@ func (r *SetPriorityLadderRequest) Validate() error {
 		seenLabel[lv.Label] = true
 		if lv.BudgetSeconds != nil && *lv.BudgetSeconds <= 0 {
 			return fmt.Errorf("budget_seconds must be positive for %q; omit it for a level with no limit", lv.Label)
+		}
+		if lv.DefaultAutoHoldAtUSD != nil && (*lv.DefaultAutoHoldAtUSD < 0 || math.IsInf(*lv.DefaultAutoHoldAtUSD, 0) || math.IsNaN(*lv.DefaultAutoHoldAtUSD)) {
+			return fmt.Errorf("default_auto_hold_at_usd must be zero or more dollars for %q; omit it for a level with no default", lv.Label)
 		}
 	}
 	return nil

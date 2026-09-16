@@ -366,6 +366,31 @@ unranked card gets no rung, no label and no limit.
 Each board sets its own ladder, and **a board with no levels ignores priorities
 entirely**: its cards carry no limit, whatever their stored priority.
 
+#### Default spend ceiling per rung
+
+A rung may also carry `default_auto_hold_at_usd`: the dollar spend ceiling a card
+**starts with** at that priority. It is a default, not a limit the ladder
+enforces — kanban-store writes it onto the card's noteboard `auto_hold_at_usd`,
+where it stays editable per card, and the scheduler's `spend-ceiling-guard` and
+`autoworker` read only the card.
+
+```sh
+{"priority_value":5,"label":"P0","budget_seconds":7200,"default_auto_hold_at_usd":20}
+```
+
+It is written when:
+
+- a card is created on the board with a priority and no `auto_hold_at_usd`;
+- a card with a priority and no ceiling is attached to the board;
+- `PATCH /api/cards/{id}` changes `priority` without also sending
+  `auto_hold_at_usd`, and the card has no ceiling **or still carries the default
+  of the rung it is leaving**. Any other number counts as set by hand and stays.
+
+A rung with no default changes nothing. Editing the ladder does not touch cards
+that already exist, and a priority changed in noteboard directly never passes
+through kanban-store, so it gets no default. A card on several boards takes the
+**lowest** default any of them gives its priority.
+
 ### Business hours
 
 A board may declare a working week, and then reports the same elapsed figures a

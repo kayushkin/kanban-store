@@ -463,6 +463,10 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 500, err.Error())
 			return
 		}
+		if err := a.applyDefaultSpendCeilingOnAttach(cardID, item); err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
 		writeJSON(w, 201, p)
 	case "DELETE":
 		if err := a.store.DetachCard(boardID, cardID); err != nil {
@@ -511,6 +515,16 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 	if err != nil {
 		writeSettingsCheckFailure(w, err)
 		return
+	}
+
+	// A priority with no ceiling of its own takes its rung's default ceiling.
+	if req.Priority != nil && req.AutoHoldAtUSD == nil {
+		defaultCeiling, err := a.lowestDefaultSpendCeilingForPriority([]string{boardID}, *req.Priority)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		req.AutoHoldAtUSD = defaultCeiling
 	}
 
 	// Create the noteboard item first — it's the source of truth.
@@ -704,6 +718,30 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			writeError(w, 400, "invalid JSON")
 			return
+		}
+		// A priority change may carry the new rung's default spend ceiling with it,
+		// in the same noteboard write. A patch that names a ceiling decides it.
+		if rawPriority, setsPriority := patch["priority"]; setsPriority {
+			if _, setsCeiling := patch["auto_hold_at_usd"]; !setsCeiling {
+				newPriorityValue, err := priorityValueOfPatch(rawPriority)
+				if err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
+				itemBefore, err := a.noteboard.GetItem(cardID)
+				if err != nil {
+					writeError(w, 502, err.Error())
+					return
+				}
+				defaultCeiling, err := a.spendCeilingForPriorityChange(cardID, itemBefore, newPriorityValue)
+				if err != nil {
+					writeError(w, 502, err.Error())
+					return
+				}
+				if defaultCeiling != nil {
+					patch["auto_hold_at_usd"] = *defaultCeiling
+				}
+			}
 		}
 		item, err := a.noteboard.PatchItem(cardID, patch)
 		if err != nil {

@@ -71,6 +71,9 @@ func migrateActivity(db *sql.DB) error {
 			return err
 		}
 	}
+	if err := addColumnIfMissing(db, "board_priority_levels", "default_auto_hold_at_usd", "REAL"); err != nil {
+		return err
+	}
 	return addColumnIfMissing(db, "columns", "budget_clock_state", "TEXT")
 }
 
@@ -292,7 +295,7 @@ func (s *Store) DeleteCardNote(noteID string) error {
 // urgent work sits at.
 func (s *Store) GetPriorityLadder(boardID string) (*model.PriorityLadder, error) {
 	rows, err := s.db.Query(
-		`SELECT board_id, priority_value, label, budget_seconds FROM board_priority_levels
+		`SELECT board_id, priority_value, label, budget_seconds, default_auto_hold_at_usd FROM board_priority_levels
 		 WHERE board_id = ? ORDER BY priority_value DESC`, boardID,
 	)
 	if err != nil {
@@ -303,8 +306,13 @@ func (s *Store) GetPriorityLadder(boardID string) (*model.PriorityLadder, error)
 	for rows.Next() {
 		var lv model.BoardPriorityLevel
 		var budget sql.NullInt64
-		if err := rows.Scan(&lv.BoardID, &lv.PriorityValue, &lv.Label, &budget); err != nil {
+		var defaultAutoHoldAtUSD sql.NullFloat64
+		if err := rows.Scan(&lv.BoardID, &lv.PriorityValue, &lv.Label, &budget, &defaultAutoHoldAtUSD); err != nil {
 			return nil, err
+		}
+		if defaultAutoHoldAtUSD.Valid {
+			v := defaultAutoHoldAtUSD.Float64
+			lv.DefaultAutoHoldAtUSD = &v
 		}
 		if budget.Valid {
 			v := int(budget.Int64)
@@ -335,9 +343,13 @@ func (s *Store) SetPriorityLadder(boardID string, levels []model.BoardPriorityLe
 		if lv.BudgetSeconds != nil {
 			budget = *lv.BudgetSeconds
 		}
+		var defaultAutoHoldAtUSD any
+		if lv.DefaultAutoHoldAtUSD != nil {
+			defaultAutoHoldAtUSD = *lv.DefaultAutoHoldAtUSD
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO board_priority_levels (board_id, priority_value, label, budget_seconds) VALUES (?, ?, ?, ?)`,
-			boardID, lv.PriorityValue, lv.Label, budget,
+			`INSERT INTO board_priority_levels (board_id, priority_value, label, budget_seconds, default_auto_hold_at_usd) VALUES (?, ?, ?, ?, ?)`,
+			boardID, lv.PriorityValue, lv.Label, budget, defaultAutoHoldAtUSD,
 		); err != nil {
 			return nil, err
 		}
