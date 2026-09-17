@@ -12,6 +12,11 @@
 # Usage: ./deploy.sh
 set -euo pipefail
 
+# One shared gate decides whether this tree may be deployed (main clone, default
+# branch, clean, pushed, not behind, and the same for every tree the build reads).
+# It lives in healthcheck/scripts/deploy-gate.sh. Do not inline or copy it.
+( cd "$(dirname "$0")" && "$HOME/bin/deploy-gate" check )
+
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 UNIT_SRC="$REPO_DIR/systemd/kanban-store.service"
 UNIT_DIR="$HOME/.config/systemd/user"
@@ -153,3 +158,6 @@ echo "    serving $BOARDS boards from $DB_PATH"
 
 printf '\n==> DEPLOYED — kanban-store %s is live on %s\n' "$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '(no git)')" "$BASE"
 [ -n "$BACKUP_PATH" ] && echo "    rollback: cp $BACKUP_PATH $BIN_PATH && systemctl --user restart $UNIT_NAME"
+
+# Last act: write this deploy to repo-store's ledger, so the next agent sees what is live.
+( cd "$(dirname "$0")" && "$HOME/bin/deploy-gate" record )
