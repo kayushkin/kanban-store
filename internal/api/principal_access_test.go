@@ -149,8 +149,10 @@ type twoBoardFixture struct {
 // administers Support. The fake already holds the group-expanded answer.
 const (
 	alice = "principal_000001"
-	bob   = "principal_000002"
-	carol = "principal_000003"
+	bob   = "principal_000004"
+	carol = "principal_000005"
+	// principal_000008 carries is_administrator in the fake principal-store.
+	deploymentAdministrator = "principal_000008"
 )
 
 func buildTwoBoards(t *testing.T, h http.Handler, grants *fakeGrantStore) twoBoardFixture {
@@ -367,4 +369,31 @@ func TestGrantStoreDownRefusesRatherThanServing(t *testing.T) {
 	a := api.New(store, noteboard.New(closedURL), principalstore.New(closedURL), llmbridge.New(closedURL), bundlestore.New(closedURL))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(closedURL, "")})
 	mustStatus(t, requestAs(t, a.Handler(), asPrincipal(alice), "GET", "/api/boards", nil), 502, "grant-store unreachable")
+}
+
+// TestAnAdministratorSeesEveryBoard pins the one fact that reaches boards
+// nobody granted: principal-store's is_administrator on a human.
+func TestAnAdministratorSeesEveryBoard(t *testing.T) {
+	h, grants, _ := setupWithPrincipalEnforcement(t)
+	f := buildTwoBoards(t, h, grants)
+
+	w := requestAs(t, h, asPrincipal(deploymentAdministrator), "GET", "/api/boards", nil)
+	mustStatus(t, w, 200, "the administrator lists boards")
+	if got := boardIDsIn(t, w); len(got) != 2 {
+		t.Fatalf("the administrator should see both boards, got %v", got)
+	}
+	mustStatus(t, requestAs(t, h, asPrincipal(deploymentAdministrator), "GET", "/api/boards/"+f.financeBoardID, nil),
+		200, "the administrator reads a board it holds no grant on")
+	mustStatus(t, requestAs(t, h, asPrincipal(deploymentAdministrator), "POST", "/api/boards/"+f.financeBoardID+"/cards",
+		model.CreateCardRequest{Title: "from the administrator", ColumnID: f.financeColumnID}), 201, "the administrator writes")
+	mustStatus(t, requestAs(t, h, asPrincipal(deploymentAdministrator), "GET", "/api/tags", nil),
+		200, "the administrator reads the cross-board tag listing")
+
+	// The administrator holds no grant at all; nothing above came from one.
+	grants.mu.Lock()
+	held := len(grants.grantsByPrincipal[deploymentAdministrator])
+	grants.mu.Unlock()
+	if held != 0 {
+		t.Fatalf("the administrator should hold no board grants, has %d", held)
+	}
 }

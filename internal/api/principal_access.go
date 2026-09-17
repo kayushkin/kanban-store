@@ -11,13 +11,12 @@ import (
 
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/grantstore"
+	"github.com/kayushkin/kanban-store/internal/principalstore"
 )
 
-// Principal enforcement: who may see and change which board.
+// Who may see and change which board.
 //
-// Off by default, and off on the host this store was built on, where one
-// operator owns every board. SetPrincipalEnforcement turns it on, and from then
-// on every request is one of two kinds:
+// There is no off switch. Every request is one of two kinds:
 //
 //   - An internal service (grant-store checking a board exists, a dispatcher,
 //     the classifier) sends X-Kanban-Store-Service-Token. A matching token is
@@ -29,6 +28,11 @@ import (
 // A request with neither is 401. The header is trusted as sent, so users must
 // never reach this store except through a gateway that removes any
 // X-Principal-Id or service token the client sent and sets its own.
+//
+// An **administrator** — principal-store's is_administrator on a human — is
+// unrestricted, like the service token: every board, every card, every list,
+// whether or not anything was granted. It is read from principal-store on each
+// request, so a demotion bites at once.
 //
 // Access is per board. A card is visible when it sits on at least one board the
 // principal can view, and changeable only when the principal can edit every
@@ -63,30 +67,32 @@ var boardAccessLevelOfRelation = map[string]BoardAccessLevel{
 	grantstore.RelationCanAdminister: BoardAccessAdminister,
 }
 
-// PrincipalEnforcement is what SetPrincipalEnforcement needs.
+// PrincipalEnforcement is what every API needs to answer a request at all.
 type PrincipalEnforcement struct {
-	// ServiceToken is compared in constant time. It must not be empty: an empty
-	// token would match every request that omits the header.
+	// ServiceToken is compared in constant time. It must be at least 32
+	// characters: a short or empty token would match requests that should not
+	// be unrestricted.
 	ServiceToken string
 	Grants       *grantstore.Client
 }
 
-// SetPrincipalEnforcement turns principal enforcement on. It panics on an empty
-// service token or a nil grant-store client, because either would leave the
-// store open while its log says it is enforcing.
+// SetPrincipalEnforcement gives the API its service token and grant-store
+// client. It panics on a short token or a nil client, at boot, because either
+// would leave the store open while its log says it is checking callers.
 func (a *API) SetPrincipalEnforcement(enforcement PrincipalEnforcement) {
-	if enforcement.ServiceToken == "" {
-		panic("kanban-store: principal enforcement needs a non-empty service token")
+	if len(enforcement.ServiceToken) < 32 {
+		panic("kanban-store: the service token must be at least 32 characters, or requests that omit the header would be unrestricted")
 	}
 	if enforcement.Grants == nil {
-		panic("kanban-store: principal enforcement needs a grant-store client")
+		panic("kanban-store: a grant-store client is required; board access is read from it on every request")
 	}
 	a.principalEnforcement = &enforcement
 }
 
 // PrincipalBoardAccess is one request's principal and what it may do on each
 // board. A nil *PrincipalBoardAccess in a request context means unrestricted:
-// enforcement is off, or an internal service sent the service token.
+// an internal service sent the service token, or the principal is an
+// administrator.
 type PrincipalBoardAccess struct {
 	PrincipalID string
 	levels      map[string]BoardAccessLevel
@@ -120,7 +126,14 @@ func principalBoardAccessFrom(r *http.Request) *PrincipalBoardAccess {
 func (a *API) principalGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		enforcement := a.principalEnforcement
-		if enforcement == nil || r.Method == http.MethodOptions || r.URL.Path == "/health" {
+		if enforcement == nil {
+			// Nothing may answer without a configured token: a nil enforcement
+			// here means the binary was wired wrong, and serving would serve
+			// every board to anyone.
+			writeError(w, http.StatusInternalServerError, "kanban-store has no service token configured, so no request can be authorized")
+			return
+		}
+		if r.Method == http.MethodOptions || r.URL.Path == "/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -139,6 +152,26 @@ func (a *API) principalGate(next http.Handler) http.Handler {
 		}
 		if !principalIDShape.MatchString(principalID) {
 			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %q is not a principal-store id (principal_000001)", PrincipalIDHeader, principalID))
+			return
+		}
+		// An administrator is past every rule below; principal-store owns that
+		// fact, and an unreachable principal-store is a 502 rather than a guess
+		// in either direction.
+		principal, err := a.principals.Get(principalID)
+		if errors.Is(err, principalstore.ErrNotFound) {
+			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %s does not exist in principal-store", PrincipalIDHeader, principalID))
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "could not read the calling principal, so access is unknown and nothing is served: "+err.Error())
+			return
+		}
+		if principal.Disabled() {
+			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %s is disabled in principal-store", PrincipalIDHeader, principalID))
+			return
+		}
+		if principal.IsAdministrator {
+			next.ServeHTTP(w, r)
 			return
 		}
 		grants, err := enforcement.Grants.EffectiveBoardGrants(principalID)

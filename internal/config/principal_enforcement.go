@@ -5,44 +5,35 @@ import (
 	"os"
 )
 
-// PrincipalEnforcementSettings is what main needs to turn on principal
-// enforcement (internal/api/principal_access.go).
+// PrincipalEnforcementSettings is what every kanban-store needs before it can
+// answer a request: the token internal services present, where board grants are
+// read, and the token grant-store itself wants. There is no off switch — a
+// store that cannot authorize a caller must not serve boards.
 type PrincipalEnforcementSettings struct {
-	Enabled       bool
 	ServiceToken  string
 	GrantStoreURL string
-	// GrantStoreServiceToken is sent to grant-store; empty is right only for a
-	// grant-store that does not enforce principals.
+	// GrantStoreServiceToken is sent to grant-store, which gates its own
+	// routes; without it every board read is a 502.
 	GrantStoreServiceToken string
 }
 
-// PrincipalEnforcementRequiredValue is the one value that turns enforcement on.
-const PrincipalEnforcementRequiredValue = "required"
-
-// ReadPrincipalEnforcementSettings reads KANBAN_STORE_PRINCIPAL_ENFORCEMENT,
-// KANBAN_STORE_SERVICE_TOKEN and GRANT_STORE_URL. Unset enforcement is off. Any
-// other value than "required" is an error, and so is "required" without a
-// service token or a grant-store URL: none of them has a default, because a
-// guessed one would start a store that believes it is enforcing and is not.
+// ReadPrincipalEnforcementSettings reads KANBAN_STORE_SERVICE_TOKEN,
+// GRANT_STORE_URL and GRANT_STORE_SERVICE_TOKEN. None has a default: a guessed
+// one would start a store that believes it is checking callers and is not.
 func ReadPrincipalEnforcementSettings() (PrincipalEnforcementSettings, error) {
-	switch value := os.Getenv("KANBAN_STORE_PRINCIPAL_ENFORCEMENT"); value {
-	case "":
-		return PrincipalEnforcementSettings{}, nil
-	case PrincipalEnforcementRequiredValue:
-	default:
-		return PrincipalEnforcementSettings{}, fmt.Errorf("KANBAN_STORE_PRINCIPAL_ENFORCEMENT=%q: leave it unset for no enforcement or set it to %q", value, PrincipalEnforcementRequiredValue)
-	}
 	settings := PrincipalEnforcementSettings{
-		Enabled:                true,
 		ServiceToken:           os.Getenv("KANBAN_STORE_SERVICE_TOKEN"),
 		GrantStoreURL:          os.Getenv("GRANT_STORE_URL"),
 		GrantStoreServiceToken: os.Getenv("GRANT_STORE_SERVICE_TOKEN"),
 	}
 	if len(settings.ServiceToken) < 32 {
-		return settings, fmt.Errorf("KANBAN_STORE_PRINCIPAL_ENFORCEMENT=required needs KANBAN_STORE_SERVICE_TOKEN of at least 32 characters")
+		return settings, fmt.Errorf("KANBAN_STORE_SERVICE_TOKEN must be at least 32 characters: internal services present it, and without it every request that omits the header would be unrestricted")
 	}
 	if settings.GrantStoreURL == "" {
-		return settings, fmt.Errorf("KANBAN_STORE_PRINCIPAL_ENFORCEMENT=required needs GRANT_STORE_URL")
+		return settings, fmt.Errorf("GRANT_STORE_URL is required: board access is read from grant-store on every request")
+	}
+	if len(settings.GrantStoreServiceToken) < 32 {
+		return settings, fmt.Errorf("GRANT_STORE_SERVICE_TOKEN must be at least 32 characters: grant-store gates its own routes and answers a call without it 401")
 	}
 	return settings, nil
 }

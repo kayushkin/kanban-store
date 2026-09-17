@@ -628,11 +628,10 @@ compiles green and panics at boot.
 
 MIT — see [LICENSE](LICENSE).
 
-## Principal enforcement (who may see which board)
+## Who may see which board
 
-Off unless `KANBAN_STORE_PRINCIPAL_ENFORCEMENT=required`. It is off on the host
-this store was built on, where one operator owns every board. Turning it on
-needs two more settings, neither of which has a default:
+There is no off switch: a store that cannot authorize a caller does not serve
+boards. Three settings are required at startup, none with a default:
 
 | Variable | Meaning |
 |---|---|
@@ -640,8 +639,12 @@ needs two more settings, neither of which has a default:
 | `GRANT_STORE_URL` | where board grants are read, once per request |
 | `GRANT_STORE_SERVICE_TOKEN` | sent to grant-store as `X-Grant-Store-Service-Token`; required when grant-store itself enforces principals, or every principal request is a 502 |
 
-With it on, every request except `/health` and `OPTIONS` must carry either the
-service token or `X-Principal-Id`; anything else is **401**. The principal id is
+Every request except `/health` and `OPTIONS` must carry either the service
+token or `X-Principal-Id`; anything else is **401**. **An administrator** —
+principal-store's `is_administrator` on a human — is unrestricted, like the
+service token: every board, every card, every list, granted or not. It is read
+from principal-store on each request, so a demotion bites at once, and a
+principal-store that cannot answer is a 502. The principal id is
 trusted as sent, so **users must never reach this store except through a
 gateway** that removes any `X-Principal-Id` or service token the client sent and
 sets its own from a verified login (llm-bridge-server's demo login does this).

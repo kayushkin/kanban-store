@@ -14,6 +14,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/api"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/grantstore"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/messaging"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -72,6 +73,7 @@ func setupWithMessageSender(t *testing.T, sender messaging.Sender) (http.Handler
 	t.Cleanup(func() { store.Close() })
 	nb := noteboard.New(notes.URL)
 	a := api.New(store, nb, principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL))
+	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New("http://127.0.0.1:1", "")})
 	if sender != nil {
 		a.SetMessageSender(sender)
 	}

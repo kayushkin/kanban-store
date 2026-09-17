@@ -30,9 +30,12 @@ const (
 
 func newFakePrincipalStore() *fakePrincipalStore {
 	return &fakePrincipalStore{disabledAtByID: map[string]int64{
-		activePrincipal:      0,
-		otherActivePrincipal: 0,
-		disabledPrincipal:    1_757_000_000,
+		activePrincipal:         0,
+		otherActivePrincipal:    0,
+		disabledPrincipal:       1_757_000_000,
+		"principal_000004":      0,
+		"principal_000005":      0,
+		deploymentAdministrator: 0,
 	}}
 }
 
@@ -48,7 +51,7 @@ func (f *fakePrincipalStore) handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]any{
 			"id": id, "kind": "human", "display_name": "Test Person", "email": "test@example.com",
-			"disabled_at": disabledAt,
+			"disabled_at": disabledAt, "is_administrator": id == deploymentAdministrator,
 		})
 	})
 	return mux

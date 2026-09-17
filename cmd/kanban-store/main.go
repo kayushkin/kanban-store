@@ -66,15 +66,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if enforcement.Enabled {
-		a.SetPrincipalEnforcement(api.PrincipalEnforcement{
-			ServiceToken: enforcement.ServiceToken,
-			Grants:       grantstore.New(enforcement.GrantStoreURL, enforcement.GrantStoreServiceToken),
-		})
-		log.Printf("principal enforcement: on; board grants read from grant-store at %s (grant-store service token set: %t); requests need X-Principal-Id or the service token", enforcement.GrantStoreURL, enforcement.GrantStoreServiceToken != "")
-	} else {
-		log.Printf("principal enforcement: off; every request sees every board")
-	}
+	a.SetPrincipalEnforcement(api.PrincipalEnforcement{
+		ServiceToken: enforcement.ServiceToken,
+		Grants:       grantstore.New(enforcement.GrantStoreURL, enforcement.GrantStoreServiceToken),
+	})
+	log.Printf("every request needs X-Principal-Id (set by the gateway from a login) or the service token; board grants come from grant-store at %s, and an administrator is past every check", enforcement.GrantStoreURL)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s, llm-bridge-server: %s, bundle-store: %s)",

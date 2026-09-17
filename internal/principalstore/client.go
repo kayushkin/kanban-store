@@ -48,6 +48,10 @@ func New(baseURL string) *Client {
 type Principal struct {
 	ID         string `json:"id"`
 	DisabledAt int64  `json:"disabled_at"`
+	// IsAdministrator is principal-store's one fact about a person that this
+	// store acts on: an administrator sees and changes every board, granted or
+	// not. See internal/api/principal_access.go.
+	IsAdministrator bool `json:"is_administrator"`
 }
 
 // Disabled reports whether principal-store has retired this principal.

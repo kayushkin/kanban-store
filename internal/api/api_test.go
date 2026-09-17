@@ -15,6 +15,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/api"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/grantstore"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
@@ -269,6 +270,15 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundle
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
 	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
+	// Every request needs a credential now, so the shared harness acts as an
+	// internal service: `do` below sends the service token. The per-principal
+	// rules have their own harness in principal_access_test.go, which points
+	// the grant-store client at a fake; a service-token request never reaches
+	// grant-store, so an unused address is right here.
+	a.SetPrincipalEnforcement(api.PrincipalEnforcement{
+		ServiceToken: testServiceToken,
+		Grants:       grantstore.New("http://127.0.0.1:1", ""),
+	})
 	return a.Handler(), nb, store, func() {
 		srv.Close()
 		store.Close()
@@ -288,6 +298,7 @@ func do(t *testing.T, h http.Handler, method, path string, body any) *httptest.R
 		r = bytes.NewReader(b)
 	}
 	req := httptest.NewRequest(method, path, r)
+	req.Header.Set(api.ServiceTokenHeader, testServiceToken)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	return w
@@ -427,6 +438,7 @@ func TestBoardErrors(t *testing.T) {
 	}
 	// Invalid JSON → 400
 	req := httptest.NewRequest("POST", "/api/boards", strings.NewReader("{not json"))
+	req.Header.Set(api.ServiceTokenHeader, testServiceToken)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != 400 {
