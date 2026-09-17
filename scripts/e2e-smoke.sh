@@ -33,6 +33,10 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Every route but /health is gated, so this run has its own throwaway token: the
+# smoke acts as an internal service, which is the shape every assertion below
+# was written against. The per-principal rules are unit-tested, not smoked here.
+SERVICE_TOKEN="e2e-smoke-service-token-000000000000000000"
 PORT="${E2E_PORT:-19107}"
 NB_PORT="${E2E_NOTEBOARD_PORT:-19106}"
 BASE="http://127.0.0.1:$PORT"
@@ -93,7 +97,8 @@ fail() {
 # A connection-level failure still exits non-zero (set -e), which is what we want.
 req() {
   local method="$1" path="$2" data="${3:-}"
-  local args=(-sS -o "$BODY" -w '%{http_code}' --max-time 15 -X "$method" "$BASE$path")
+  local args=(-sS -o "$BODY" -w '%{http_code}' --max-time 15 -X "$method"
+    -H "X-Kanban-Store-Service-Token: $SERVICE_TOKEN" "$BASE$path")
   if [ -n "$data" ]; then
     args+=(-H 'Content-Type: application/json' -d "$data")
   fi
@@ -128,6 +133,9 @@ start_server() {
   KANBAN_DB="$DB_PATH" \
   KANBAN_NOTEBOARD_URL="$noteboard_url" \
   PRINCIPAL_STORE_URL="$NB_UNREACHABLE" \
+  KANBAN_STORE_SERVICE_TOKEN="$SERVICE_TOKEN" \
+  GRANT_STORE_URL="$NB_UNREACHABLE" \
+  GRANT_STORE_SERVICE_TOKEN="$SERVICE_TOKEN" \
     "$BIN_DIR/kanban-store" >>"$TMP_DIR/server.log" 2>&1 &
   SERVER_PID=$!
   echo "    pid: $SERVER_PID  db: $DB_PATH  noteboard: $noteboard_url"

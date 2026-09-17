@@ -129,6 +129,21 @@ echo "    /health: $HEALTH"
 # Zero boards means the binary opened some OTHER database — a fresh empty one it
 # just created. That is the failure this assertion exists for: it would
 # otherwise look like a perfectly healthy deploy.
+# Every route but /health is gated. Check the real credential — read the way the
+# unit reads it — and check that a bare call is refused, so a deploy can never
+# leave the store serving boards to anyone.
+TOKEN_FILE="${KANBAN_STORE_TOKEN_FILE:-$HOME/.config/principal-gating-tokens.env}"
+SERVICE_TOKEN="${KANBAN_STORE_SERVICE_TOKEN:-}"
+if [ -z "$SERVICE_TOKEN" ] && [ -r "$TOKEN_FILE" ]; then
+  SERVICE_TOKEN="$(sed -n 's/^KANBAN_STORE_SERVICE_TOKEN=//p' "$TOKEN_FILE" | head -1)"
+fi
+[ -n "$SERVICE_TOKEN" ] || { rollback; fail "no KANBAN_STORE_SERVICE_TOKEN to verify with (looked in the environment and $TOKEN_FILE) — rolled back"; }
+curl -fsS -H "X-Kanban-Store-Service-Token: $SERVICE_TOKEN" "$BASE/api/boards" >/dev/null \
+  || { rollback; fail "/api/boards did not answer the service token — rolled back"; }
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/boards")" = "401" ] \
+  || { rollback; fail "/api/boards answered an unauthenticated call with something other than 401 — rolled back"; }
+echo "    /api/boards answered the service token and 401'd without it"
+
 BOARDS="$(jq -r '.counts.boards' <<<"$HEALTH")"
 if ! { [ "$BOARDS" -gt 0 ]; } 2>/dev/null; then
   rollback
