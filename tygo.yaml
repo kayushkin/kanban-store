@@ -1,0 +1,14 @@
+# TypeScript types generated from this store's Go types. The Go structs in
+# internal/model are the source of truth; ts/ is a render of them. Regenerate
+# with ./generate-ts.sh after changing a wire type.
+#
+# A card's item is noteboard's record passed through unchanged, so its type
+# comes from noteboard's own generated package rather than being copied here.
+packages:
+  - path: "github.com/kayushkin/kanban-store/internal/model"
+    output_path: "ts/model.ts"
+    frontmatter: |
+      import type { Item as NoteboardItem } from "@kayushkin/noteboard-types";
+    type_mappings:
+      "json.RawMessage": "unknown"
+      "time.Time": "string"

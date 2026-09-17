@@ -247,17 +247,6 @@ func (a *API) noteByID(w http.ResponseWriter, r *http.Request, noteID string) {
 
 // ============================ Timeline ============================
 
-// CardTimeline is the answer to "what happened to this card, in what order, and
-// how long did each step take".
-type CardTimeline struct {
-	CardID  string                    `json:"card_id"`
-	BoardID string                    `json:"board_id,omitempty"`
-	Summary *model.CardTimeSummary    `json:"summary"`
-	Entries []model.TimelineEntry     `json:"entries"`
-	Notes   []model.CardNote          `json:"notes"`
-	Level   *model.BoardPriorityLevel `json:"priority_level,omitempty"`
-}
-
 func (a *API) cardTimeline(w http.ResponseWriter, r *http.Request, cardID string) {
 	if r.Method != "GET" {
 		writeError(w, 405, "method not allowed")
@@ -317,7 +306,7 @@ func (a *API) cardTimeline(w http.ResponseWriter, r *http.Request, cardID string
 	summary, entries := timeaccounting.Compute(timeaccounting.Input{
 		Events: events, Notes: notesByID, Level: level, Hours: hours, Now: time.Now().UTC(),
 	})
-	writeJSON(w, 200, CardTimeline{
+	writeJSON(w, 200, model.CardTimeline{
 		CardID: cardID, BoardID: boardID, Summary: summary, Entries: entries, Notes: notes, Level: level,
 	})
 }

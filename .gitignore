@@ -12,3 +12,6 @@ bin/
 *.key
 *.pem
 credentials.json
+
+# npm link target for the generated types package
+ts/node_modules/

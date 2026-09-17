@@ -1017,9 +1017,9 @@ func (a *API) entityScoped(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Return parallel id/item arrays so callers can spot orphans (item==null).
-		out := make([]map[string]any, len(ids))
+		out := make([]model.EntityCardView, len(ids))
 		for i, id := range ids {
-			out[i] = map[string]any{"card_id": id, "item": items[i]}
+			out[i] = model.EntityCardView{CardID: id, Item: items[i]}
 		}
 		writeJSON(w, 200, out)
 	case "tags":

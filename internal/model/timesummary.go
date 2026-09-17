@@ -73,3 +73,14 @@ type CardTimeSummary struct {
 
 	Segments []TimeSegment `json:"segments,omitempty"`
 }
+
+// CardTimeline is the answer to "what happened to this card, in what order, and
+// how long did each step take".
+type CardTimeline struct {
+	CardID  string              `json:"card_id"`
+	BoardID string              `json:"board_id,omitempty"`
+	Summary *CardTimeSummary    `json:"summary" tstype:"CardTimeSummary,required"`
+	Entries []TimelineEntry     `json:"entries"`
+	Notes   []CardNote          `json:"notes"`
+	Level   *BoardPriorityLevel `json:"priority_level,omitempty"`
+}

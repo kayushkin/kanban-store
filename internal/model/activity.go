@@ -254,14 +254,14 @@ type BoardPriorityLevel struct {
 	Label         string `json:"label"`
 	// BudgetSeconds is the time limit for work at this rung, measured on the
 	// budget clock. Nil means this rung is named but not timed.
-	BudgetSeconds *int `json:"budget_seconds"`
+	BudgetSeconds *int `json:"budget_seconds" tstype:"number | null,required"`
 	// DefaultAutoHoldAtUSD is the spend ceiling a card is GIVEN when it lands on
 	// this rung — a starting value written onto the card's noteboard
 	// auto_hold_at_usd, which stays editable per card. It is not enforced from
 	// here: the scheduler's spend-ceiling-guard reads the card, never the ladder.
 	// Nil means this rung suggests no ceiling. Zero is a real default ("stop
 	// before spending a cent"), hence the pointer.
-	DefaultAutoHoldAtUSD *float64 `json:"default_auto_hold_at_usd"`
+	DefaultAutoHoldAtUSD *float64 `json:"default_auto_hold_at_usd" tstype:"number | null,required"`
 }
 
 // PriorityLadder is a board's whole ladder, top rung first. An empty ladder means

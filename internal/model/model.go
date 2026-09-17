@@ -380,7 +380,7 @@ func (r *CreateEntityTagRequest) Validate() error {
 // Cards are joined with their noteboard content; columns carry their cards
 // in placement order.
 type BoardView struct {
-	Board   *Board       `json:"board"`
+	Board   *Board       `json:"board" tstype:"Board,required"`
 	Columns []ColumnView `json:"columns"`
 	Orphans []CardView   `json:"orphans,omitempty"`
 	// PriorityLadder is the board's rungs, so a client can label and colour a card
@@ -390,7 +390,7 @@ type BoardView struct {
 }
 
 type ColumnView struct {
-	Column *Column    `json:"column"`
+	Column *Column    `json:"column" tstype:"Column,required"`
 	Cards  []CardView `json:"cards"`
 	// Total is how many cards the column holds, which is not len(Cards) once a
 	// board view has been capped. A client needs both to say "showing 25 of 6,466"
@@ -402,8 +402,10 @@ type ColumnView struct {
 // through unchanged), links and assignments. Item is `any` so we don't
 // redefine noteboard's Item shape here.
 type CardView struct {
-	Placement   *Placement       `json:"placement"`
-	Item        any              `json:"item"`
+	Placement *Placement `json:"placement" tstype:"Placement,required"`
+	// Item is the noteboard item, passed through unchanged; null when the item
+	// was hard-deleted out from under kanban-store (see BoardView.Orphans).
+	Item        any              `json:"item" tstype:"NoteboardItem | null"`
 	Links       []CardLink       `json:"links,omitempty"`
 	Assignments []CardAssignment `json:"assignments,omitempty"`
 	// Time is the card's clock as the board sees it: how long it has been alive,
@@ -411,6 +413,15 @@ type CardView struct {
 	// its priority sets. Computed from the card's events on every read, never
 	// stored.
 	Time *CardTimeSummary `json:"time,omitempty"`
+}
+
+// EntityCardView is one row of GET /api/entities/{type}/{ref}/cards: a card
+// that links the entity, with its noteboard item passed through unchanged.
+// Item is null when the item was hard-deleted out from under kanban-store, so
+// a caller can spot orphans.
+type EntityCardView struct {
+	CardID string `json:"card_id"`
+	Item   any    `json:"item" tstype:"NoteboardItem | null"`
 }
 
 type EntityTypeInfo struct {
