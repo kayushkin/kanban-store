@@ -182,11 +182,11 @@ func (a *API) messageTriggerOptions(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < fieldType.NumField(); i++ {
 		fields = append(fields, fieldType.Field(i).Name)
 	}
-	writeJSON(w, 200, map[string]any{
-		"event_kinds":               model.MessageTriggerEventKinds,
-		"column_filter_event_kinds": model.MessageTriggerColumnFilterEventKinds,
-		"template_fields":           fields,
-		"delivery_configured":       a.messages.DeliveryConfigured(),
+	writeJSON(w, 200, model.MessageTriggerOptions{
+		EventKinds:             model.MessageTriggerEventKinds,
+		ColumnFilterEventKinds: model.MessageTriggerColumnFilterEventKinds,
+		TemplateFields:         fields,
+		DeliveryConfigured:     a.messages.DeliveryConfigured(),
 	})
 }
 

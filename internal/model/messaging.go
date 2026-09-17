@@ -98,6 +98,17 @@ func ParseMessageTemplate(text string) (*template.Template, error) {
 	return template.New("message").Option("missingkey=error").Parse(text)
 }
 
+// MessageTriggerOptions is what GET /api/message-trigger-options serves: the
+// vocabularies a trigger editor needs and whether delivery is configured on
+// this kanban-store at all, so a UI never hardcodes an event kind or a
+// template field.
+type MessageTriggerOptions struct {
+	EventKinds             []EventKind `json:"event_kinds"`
+	ColumnFilterEventKinds []EventKind `json:"column_filter_event_kinds"`
+	TemplateFields         []string    `json:"template_fields"`
+	DeliveryConfigured     bool        `json:"delivery_configured"`
+}
+
 // UpsertMessageTriggerRequest is the body of POST and PATCH. Every field is a
 // pointer so PATCH can tell "not sent" from "cleared"; POST fills the
 // required ones or is refused.
