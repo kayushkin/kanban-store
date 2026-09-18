@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -125,4 +127,46 @@ func TestACardOnAnUnseenBoardIsViewOnlyAndTheBoardIsNotNamed(t *testing.T) {
 	if len(view.States) != 2 {
 		t.Errorf("the service sees %d states, want both boards", len(view.States))
 	}
+}
+
+// Two agents open one ticket. The first saves; the second's save was made
+// against a version that is gone. noteboard owns the item and refuses; this
+// store has to carry the question there and the answer back, unchanged.
+func TestASaveMadeAgainstAnOlderCardIsRefusedWithTheCardAsItIsNow(t *testing.T) {
+	h, grants, _ := setupWithPrincipalEnforcement(t)
+	f := buildTwoBoards(t, h, grants)
+
+	w := requestAs(t, h, asPrincipal(alice), "GET", "/api/cards/"+f.supportCardID, nil)
+	mustStatus(t, w, 200, "alice opens the card")
+	var opened model.CardDetail
+	decodeSuccessfulResponse(t, w, &opened)
+	versionBothHold := `"` + opened.Item.(map[string]any)["updated_at"].(string) + `"`
+
+	save := func(who, title, ifMatch string) *httptest.ResponseRecorder {
+		headers := asPrincipal(who)
+		if ifMatch != "" {
+			headers["If-Match"] = ifMatch
+		}
+		return requestAs(t, h, headers, "PATCH", "/api/cards/"+f.supportCardID, map[string]any{"title": title})
+	}
+	mustStatus(t, save(carol, "carol saved first", versionBothHold), 200, "the first save")
+
+	second := save(alice, "alice saved second", versionBothHold)
+	mustStatus(t, second, 412, "the second save, made against the version carol replaced")
+	var refusal struct {
+		Error   string         `json:"error"`
+		Current map[string]any `json:"current"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &refusal); err != nil {
+		t.Fatalf("412 body is not JSON: %s", second.Body.String())
+	}
+	if refusal.Current["title"] != "carol saved first" {
+		t.Fatalf("412 body = %s, want noteboard's answer carrying the card as carol left it", second.Body.String())
+	}
+
+	// Retried against the version the refusal handed back, it is applied; and a
+	// save that asks for no check is applied as it always was.
+	retryVersion := `"` + refusal.Current["updated_at"].(string) + `"`
+	mustStatus(t, save(alice, "alice, having seen carol's", retryVersion), 200, "the retry against the current version")
+	mustStatus(t, save(alice, "no precondition", ""), 200, "a save with no If-Match")
 }

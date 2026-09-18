@@ -159,7 +159,7 @@ Card-scoped operations, across every board the card is on:
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/cards/{id}` | One card read through the gate: `item`, the `placements` the caller can view, `links`, `assignments`, `ticket`, and `access` — what the caller may do to it. **404** for an id that is on no board, so this is not a way to read any noteboard item. noteboard checks no caller, so a client that must not see every item reads a card's body here |
-| `PATCH` | `/api/cards/{id}` | Forwarded to noteboard unchanged — edit title, body, tags, anything |
+| `PATCH` | `/api/cards/{id}` | Forwarded to noteboard unchanged — edit title, body, tags, anything. Send `If-Match: "<the item's updated_at>"` to refuse saving over someone else's change: it goes to noteboard as sent, and noteboard's **412** `{"error":…,"current":{the item as it is now}}` comes back unchanged, with nothing written. No header saves whatever the version |
 | `DELETE` | `/api/cards/{id}` | Reversible; `?hard=true` purges the item and drops every placement |
 | `POST` | `/api/cards/{id}/move` | `{"board_id":…,"column_id":…,"position":…}` |
 | `GET` | `/api/cards/{id}/placements` | Every board this card appears on |

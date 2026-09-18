@@ -92,7 +92,7 @@ func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+PrincipalIDHeader)
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, If-Match, "+PrincipalIDHeader)
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(204)
 			return
@@ -818,7 +818,21 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 				}
 			}
 		}
-		item, err := a.noteboard.PatchItem(cardID, patch)
+		// If-Match goes to noteboard as sent: it owns the item and its version,
+		// and the check has to happen where the write does.
+		item, err := a.noteboard.PatchItemIfMatch(cardID, patch, r.Header.Get("If-Match"))
+		var changed *noteboard.ItemChangedError
+		if errors.As(err, &changed) {
+			// Someone else saved first. noteboard's answer carries the item as it
+			// is now, and is relayed unchanged.
+			w.Header().Set("Content-Type", "application/json")
+			if changed.ETag != "" {
+				w.Header().Set("ETag", changed.ETag)
+			}
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = w.Write(changed.Body)
+			return
+		}
 		if err != nil {
 			writeError(w, 502, err.Error())
 			return

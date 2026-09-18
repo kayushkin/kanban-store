@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,15 @@ type fakeNoteboard struct {
 	// of applying the change. noteboard being reachable for the create and
 	// unreachable a millisecond later is the ordinary case, not an exotic one.
 	patchStatus int
+	// versions counts writes. An item's updated_at is its version, and the ids
+	// above must not move when a PATCH takes one.
+	versions int
+}
+
+// nextVersion is an updated_at no earlier write was given. Call it with mu held.
+func (f *fakeNoteboard) nextVersion() string {
+	f.versions++
+	return fmt.Sprintf("2026-09-18T00:00:00.%09dZ", f.versions)
 }
 
 func newFakeNoteboard() *fakeNoteboard {
@@ -79,6 +89,7 @@ func (f *fakeNoteboard) handler() http.Handler {
 		f.seq++
 		id := "nb-" + itoa(f.seq)
 		payload["id"] = id
+		payload["updated_at"] = f.nextVersion()
 		if _, ok := payload["status"]; !ok {
 			payload["status"] = "open"
 		}
@@ -123,7 +134,22 @@ func (f *fakeNoteboard) handler() http.Handler {
 		}
 		it, ok := f.items[id]
 		var out map[string]any
+		// If-Match, as noteboard reads it (noteboard internal/api/api.go,
+		// expectedUpdatedAtFromIfMatch; measured on the live service 2026-09-18):
+		// the quoted updated_at the patch was made against. A stored version that
+		// differs is a 412 carrying the item as it is now, and nothing is written.
+		if ifMatch := r.Header.Get("If-Match"); ok && ifMatch != "" && ifMatch != "*" {
+			if stored, _ := it["updated_at"].(string); ifMatch != `"`+stored+`"` {
+				current := clone(it)
+				f.mu.Unlock()
+				w.Header().Set("ETag", `"`+stored+`"`)
+				writeJSON(w, 412, map[string]any{"error": "item " + id + " was changed after the version this update was made against; nothing was written", "current": current})
+				return
+			}
+		}
 		if ok {
+			// Every applied PATCH moves updated_at, which is the item's version.
+			it["updated_at"] = f.nextVersion()
 			// noteboard decodes a PATCH into model.UpdateItemRequest NON-strictly:
 			// a key that struct does not carry is dropped in silence and still
 			// answered 200. Applying every key, as this fake used to, makes a

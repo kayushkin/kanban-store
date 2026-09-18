@@ -69,12 +69,24 @@ func (c *Client) GetItem(id string) (Item, error) {
 }
 
 func (c *Client) PatchItem(id string, patch map[string]any) (Item, error) {
+	return c.PatchItemIfMatch(id, patch, "")
+}
+
+// PatchItemIfMatch is PatchItem carrying the caller's If-Match header to
+// noteboard unchanged. noteboard reads it as the updated_at the patch was made
+// against and answers 412 when the item has changed since; that comes back as
+// an *ItemChangedError holding noteboard's body. An empty ifMatch sends no
+// header, and noteboard then applies the patch whatever the item's version.
+func (c *Client) PatchItemIfMatch(id string, patch map[string]any, ifMatch string) (Item, error) {
 	body, err := json.Marshal(patch)
 	if err != nil {
 		return nil, err
 	}
 	req, _ := http.NewRequest("PATCH", c.BaseURL+"/api/items/"+url.PathEscape(id), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
 	return c.doJSON(req, http.StatusOK, id)
 }
 
@@ -194,6 +206,19 @@ type notFoundError struct{ id string }
 
 func (e *notFoundError) Error() string { return "noteboard item not found: " + e.id }
 
+// ItemChangedError is noteboard's 412: the patch was made against a version of
+// the item that is gone, and nothing was written. Body is noteboard's answer
+// exactly as sent — {"error":…,"current":{the item as it is now}} — for the
+// caller to relay, not to re-render.
+type ItemChangedError struct {
+	ETag string
+	Body []byte
+}
+
+func (e *ItemChangedError) Error() string {
+	return "noteboard refused the patch: the item changed after the version it was made against"
+}
+
 // IsNotFound reports whether err is noteboard answering that the item does
 // not exist, as opposed to noteboard failing to answer.
 func IsNotFound(err error) bool { return isNotFound(err) }
@@ -217,6 +242,13 @@ func (c *Client) doJSON(req *http.Request, want int, itemID string) (Item, error
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound && itemID != "" {
 		return nil, &notFoundError{id: itemID}
+	}
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("noteboard %s %s: 412, and its body could not be read: %w", req.Method, req.URL.Path, err)
+		}
+		return nil, &ItemChangedError{ETag: resp.Header.Get("ETag"), Body: body}
 	}
 	if resp.StatusCode != want {
 		body, _ := io.ReadAll(resp.Body)
