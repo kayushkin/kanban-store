@@ -149,7 +149,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/boards/{id}/access` | What the caller of this request may do on the board: `{"principal_id":…,"unrestricted":…,"relations":["can_view","can_edit"]}`. `relations` is every relation that holds, weakest first, with the inclusion rule already applied — ask whether the one you need is in it. Needs `can_view`; **404** otherwise |
-| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column** |
+| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=` keep matching cards — see [Filtering a board](#filtering-a-board) |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
 | `DELETE` | `/api/boards/{id}/cards/{cardID}` | Detaches from this board only; the item survives |
@@ -580,6 +580,39 @@ exists to avoid. A client showing a page therefore sorts what it has, and has to
 say so on screen. Sorting the full column server-side needs a batch item read on
 noteboard (`GET /api/items?ids=…`), which does not exist yet — see [The noteboard
 contract](#the-noteboard-contract).
+
+### Filtering a board
+
+`GET /api/boards/{id}/cards` and `GET /api/columns/{id}/cards` take the same
+filter. A card must match every parameter sent:
+
+| Parameter | Keeps |
+|---|---|
+| `assignee=principal_000001` | cards that principal is assigned to |
+| `unassigned=true` | cards nobody is assigned to |
+| `tickets_only=true` | cards that are tickets |
+| `requester=principal_000010` | tickets that contact asked for |
+| `channel=email` | tickets that arrived that way, from `GET /api/ticket-channels` |
+
+The filter runs in the query that pages the column, so a page is cut **after**
+the filter and each column's `total` counts what the filter keeps — *showing 25
+of 310 matching* stays true. A value that cannot mean anything — an id of the
+wrong shape, a channel outside the vocabulary, `unassigned=yes`, `assignee`
+together with `unassigned=true` — is a **400** naming what would. It is not
+dropped: a dropped filter answers every card, which reads as "all of these
+match".
+
+A ticket's lifecycle state is not a parameter because it is already a column:
+read the columns whose `lifecycle_state` is the one you want.
+
+⚠️ **Tags, priority and due date cannot be filtered here**, for the reason a
+board cannot be sorted by them: they live in noteboard, and looking would mean
+fetching every item on the board. `/api/search?q=…&board_id=…` is the full-text
+route; a tag or priority filter over a whole board needs the same batch read on
+noteboard that server-side sorting does.
+
+A page of a column carries each card's `ticket`, as the board view does. It did
+not until 2026-09-18, so a ticket list lost its requesters on page two.
 
 ## The noteboard contract
 

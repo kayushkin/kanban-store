@@ -453,7 +453,12 @@ func (a *API) boardCards(w http.ResponseWriter, r *http.Request, boardID string)
 		if err != nil {
 			limit = 0
 		}
-		view, err := a.assembleBoardView(boardID, limit)
+		filter, err := cardFilterFromQuery(r)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		view, err := a.assembleBoardView(boardID, limit, filter)
 		if err != nil {
 			mapDBErr(w, err)
 			return
@@ -1302,7 +1307,43 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 // the whole board server-side would mean fetching every item on it, which is the
 // cost paging exists to avoid. A client showing a page therefore sorts what it
 // has, and has to say so.
-func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, error) {
+// cardFilterFromQuery reads the filter a board or column read was asked for.
+// A value that cannot mean anything is a 400 naming what would: a filter that
+// was silently dropped answers every card, which reads as "all of these match".
+func cardFilterFromQuery(r *http.Request) (db.CardFilter, error) {
+	query := r.URL.Query()
+	filter := db.CardFilter{
+		AssigneePrincipalID:  query.Get("assignee"),
+		RequesterPrincipalID: query.Get("requester"),
+	}
+	for name, principalID := range map[string]string{"assignee": filter.AssigneePrincipalID, "requester": filter.RequesterPrincipalID} {
+		if principalID != "" && !principalIDShape.MatchString(principalID) {
+			return db.CardFilter{}, fmt.Errorf("%s must be a principal-store id matching ^%s$ (for example principal_000010), got %q", name, config.PrincipalIDPattern, principalID)
+		}
+	}
+	for name, target := range map[string]*bool{"unassigned": &filter.Unassigned, "tickets_only": &filter.TicketsOnly} {
+		switch value := query.Get(name); value {
+		case "", "false":
+		case "true":
+			*target = true
+		default:
+			return db.CardFilter{}, fmt.Errorf("%s must be true or false, got %q", name, value)
+		}
+	}
+	if filter.Unassigned && filter.AssigneePrincipalID != "" {
+		return db.CardFilter{}, fmt.Errorf("assignee and unassigned=true cannot both be asked for: no card matches both")
+	}
+	if rawChannel := query.Get("channel"); rawChannel != "" {
+		channel, known := model.NormalizeTicketChannel(rawChannel)
+		if !known {
+			return db.CardFilter{}, model.ErrUnknownTicketChannel(rawChannel)
+		}
+		filter.Channel = channel
+	}
+	return filter, nil
+}
+
+func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter) (*model.BoardView, error) {
 	b, err := a.store.GetBoard(boardID)
 	if err != nil {
 		return nil, err
@@ -1316,12 +1357,14 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 	var placements []*model.Placement
 	totals := map[string]int{}
 	for _, c := range cols {
-		total, err := a.store.CountColumnCards(c.ID)
+		// The total is of the cards the filter keeps, so "showing 25 of 310"
+		// stays true of what is on screen.
+		total, err := a.store.CountColumnCardsMatching(c.ID, filter)
 		if err != nil {
 			return nil, err
 		}
 		totals[c.ID] = total
-		page, err := a.store.ListPlacementsByColumn(c.ID, limit, 0)
+		page, err := a.store.ListPlacementsByColumnMatching(c.ID, filter, limit, 0)
 		if err != nil {
 			return nil, err
 		}

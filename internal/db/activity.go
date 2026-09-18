@@ -381,9 +381,76 @@ func EventTime(at *time.Time) time.Time {
 // would have to fetch every item on the board to sort by it, which is the cost
 // paging exists to avoid.
 func (s *Store) ListPlacementsByColumn(columnID string, limit, offset int) ([]*model.Placement, error) {
-	q := `SELECT card_id, board_id, column_id, position, created_at, updated_at
-	      FROM placements WHERE column_id=? ORDER BY position ASC, created_at ASC`
-	args := []any{columnID}
+	return s.ListPlacementsByColumnMatching(columnID, CardFilter{}, limit, offset)
+}
+
+// CardFilter narrows a board or column read to the cards that match every
+// field set. Every field is a fact this store owns — who is on the card, and
+// the ticket row — so the filter runs in the same query that pages the column
+// and ColumnView.Total stays exact: "showing 25 of 310 matching".
+//
+// What a card says — its tags, its priority, its due date — lives in noteboard
+// and is not filterable here: this store would have to fetch every item on the
+// board to look, which is the cost paging exists to avoid.
+type CardFilter struct {
+	// AssigneePrincipalID keeps cards this principal is assigned to.
+	AssigneePrincipalID string
+	// Unassigned keeps cards nobody is assigned to.
+	Unassigned bool
+	// TicketsOnly keeps cards that are tickets.
+	TicketsOnly bool
+	// RequesterPrincipalID keeps tickets this contact asked for.
+	RequesterPrincipalID string
+	// Channel keeps tickets that arrived this way.
+	Channel model.TicketChannel
+}
+
+// IsEmpty reports whether the filter keeps every card.
+func (f CardFilter) IsEmpty() bool { return f == CardFilter{} }
+
+// cardFilterConditions renders a filter as SQL over a placements row aliased p.
+// One place, so the page and its count can never disagree about what matches.
+func cardFilterConditions(filter CardFilter) (string, []any) {
+	conditions := ""
+	args := []any{}
+	if filter.AssigneePrincipalID != "" {
+		conditions += ` AND EXISTS (SELECT 1 FROM card_assignments a WHERE a.card_id=p.card_id AND a.principal_id=?)`
+		args = append(args, filter.AssigneePrincipalID)
+	}
+	if filter.Unassigned {
+		conditions += ` AND NOT EXISTS (SELECT 1 FROM card_assignments a WHERE a.card_id=p.card_id)`
+	}
+	if filter.TicketsOnly || filter.RequesterPrincipalID != "" || filter.Channel != "" {
+		conditions += ` AND EXISTS (SELECT 1 FROM tickets t WHERE t.card_id=p.card_id`
+		if filter.RequesterPrincipalID != "" {
+			conditions += ` AND t.requester_principal_id=?`
+			args = append(args, filter.RequesterPrincipalID)
+		}
+		if filter.Channel != "" {
+			conditions += ` AND t.channel=?`
+			args = append(args, string(filter.Channel))
+		}
+		conditions += `)`
+	}
+	return conditions, args
+}
+
+// CountColumnCardsMatching is how many of a column's cards a filter keeps.
+func (s *Store) CountColumnCardsMatching(columnID string, filter CardFilter) (int, error) {
+	conditions, filterArgs := cardFilterConditions(filter)
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM placements p WHERE p.column_id=?`+conditions,
+		append([]any{columnID}, filterArgs...)...).Scan(&n)
+	return n, err
+}
+
+// ListPlacementsByColumnMatching is ListPlacementsByColumn over the cards a
+// filter keeps, paged after the filter so a page is never short for no reason.
+func (s *Store) ListPlacementsByColumnMatching(columnID string, filter CardFilter, limit, offset int) ([]*model.Placement, error) {
+	conditions, filterArgs := cardFilterConditions(filter)
+	q := `SELECT p.card_id, p.board_id, p.column_id, p.position, p.created_at, p.updated_at
+	      FROM placements p WHERE p.column_id=?` + conditions + ` ORDER BY p.position ASC, p.created_at ASC`
+	args := append([]any{columnID}, filterArgs...)
 	if limit > 0 {
 		q += ` LIMIT ? OFFSET ?`
 		args = append(args, limit, offset)

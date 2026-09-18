@@ -376,12 +376,17 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		offset = 0
 	}
 
-	total, err := a.store.CountColumnCards(columnID)
+	filter, err := cardFilterFromQuery(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	total, err := a.store.CountColumnCardsMatching(columnID, filter)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
-	placements, err := a.store.ListPlacementsByColumn(columnID, limit, offset)
+	placements, err := a.store.ListPlacementsByColumnMatching(columnID, filter, limit, offset)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -421,6 +426,14 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		return
 	}
 
+	// A page of a column is the same cards the board view shows, so it carries
+	// the same ticket: without it, page two of a ticket list has no requester.
+	ticketsByCard, err := a.store.ListTicketsForCards(ids)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
 	asOf := time.Now().UTC()
 	cards := make([]model.CardView, 0, len(placements))
 	for i, p := range placements {
@@ -433,7 +446,7 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		summary.Segments = nil
 		cards = append(cards, model.CardView{
 			Placement: p, Item: items[i], Links: linksByCard[p.CardID],
-			Assignments: assignmentsByCard[p.CardID], Time: summary,
+			Assignments: assignmentsByCard[p.CardID], Ticket: ticketsByCard[p.CardID], Time: summary,
 		})
 	}
 	writeJSON(w, 200, model.ColumnView{Column: col, Cards: cards, Total: total})
