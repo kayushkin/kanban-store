@@ -88,7 +88,7 @@ func getBoard(t *testing.T, h http.Handler, id string) model.Board {
 		t.Fatalf("get board: %d %s", w.Code, w.Body.String())
 	}
 	var b model.Board
-	decode(t, w, &b)
+	decodeSuccessfulResponse(t, w, &b)
 	return b
 }
 
@@ -158,7 +158,7 @@ func TestBoardSettingsListedWithTheBoard(t *testing.T) {
 	patchBoard(t, h, boardID, model.UpdateBoardRequest{DefaultInstanceID: str(knownInstanceID)})
 	w := do(t, h, "GET", "/api/boards", nil)
 	var boards []model.Board
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	if len(boards) != 1 || boards[0].DefaultInstanceID != knownInstanceID {
 		t.Fatalf("list does not carry settings: %+v", boards)
 	}
@@ -268,7 +268,7 @@ func TestACardCreatedOnTheBoardTakesItsDefaultAssignee(t *testing.T) {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	if len(cv.Assignments) != 1 || cv.Assignments[0].PrincipalID != activePrincipal {
 		t.Fatalf("created card should carry the default assignee: %+v", cv.Assignments)
 	}
@@ -294,7 +294,7 @@ func TestAttachingAnAlreadyAssignedCardKeepsItsAssignee(t *testing.T) {
 	sourceColumn := mkColumn(t, h, sourceBoard, "Todo", "")
 	w := do(t, h, "POST", "/api/boards/"+sourceBoard+"/cards", model.CreateCardRequest{Title: "owned", ColumnID: sourceColumn})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 	if len(cv.Assignments) != 0 {
 		t.Fatalf("a board with no default should create unassigned cards: %+v", cv.Assignments)
@@ -314,7 +314,7 @@ func TestAttachingAnAlreadyAssignedCardKeepsItsAssignee(t *testing.T) {
 	}
 	w = do(t, h, "GET", "/api/cards/"+cardID+"/assignments", nil)
 	var assignments []model.CardAssignment
-	decode(t, w, &assignments)
+	decodeSuccessfulResponse(t, w, &assignments)
 	if len(assignments) != 1 {
 		t.Fatalf("attach should not add an assignee to an assigned card: %+v", assignments)
 	}
@@ -330,7 +330,7 @@ func TestAttachingAnUnassignedCardTakesTheBoardDefault(t *testing.T) {
 	sourceColumn := mkColumn(t, h, sourceBoard, "Todo", "")
 	w := do(t, h, "POST", "/api/boards/"+sourceBoard+"/cards", model.CreateCardRequest{Title: "loose", ColumnID: sourceColumn})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	targetBoard := mkBoard(t, h, "Target")
 	targetColumn := mkColumn(t, h, targetBoard, "Inbox", "")
 	patchBoard(t, h, targetBoard, model.UpdateBoardRequest{DefaultPrincipalID: str(activePrincipal)})
@@ -339,7 +339,7 @@ func TestAttachingAnUnassignedCardTakesTheBoardDefault(t *testing.T) {
 	}
 	w = do(t, h, "GET", "/api/cards/"+cv.Placement.CardID+"/assignments", nil)
 	var assignments []model.CardAssignment
-	decode(t, w, &assignments)
+	decodeSuccessfulResponse(t, w, &assignments)
 	if len(assignments) != 1 || assignments[0].PrincipalID != activePrincipal {
 		t.Fatalf("attach should hand an unassigned card to the board default: %+v", assignments)
 	}

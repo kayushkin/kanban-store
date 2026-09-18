@@ -28,7 +28,7 @@ func effectiveFor(t *testing.T, h http.Handler, boardID string, tags ...string) 
 		t.Fatalf("effective defaults: %d %s", w.Code, w.Body.String())
 	}
 	var resolved model.EffectiveDefaults
-	decode(t, w, &resolved)
+	decodeSuccessfulResponse(t, w, &resolved)
 	return resolved
 }
 
@@ -45,7 +45,7 @@ func TestTagRulesRoundTripInOrderAndKeepIDs(t *testing.T) {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
 	var first model.BoardTagRules
-	decode(t, w, &first)
+	decodeSuccessfulResponse(t, w, &first)
 	if len(first.Rules) != 2 || first.Rules[0].Position != 0 || first.Rules[1].Tags[0] != "cat:product" || first.Rules[0].ID == "" {
 		t.Fatalf("unexpected rules after put: %+v", first.Rules)
 	}
@@ -60,7 +60,7 @@ func TestTagRulesRoundTripInOrderAndKeepIDs(t *testing.T) {
 	}
 	got := do(t, h, "GET", "/api/boards/"+boardID+"/tag-rules", nil)
 	var second model.BoardTagRules
-	decode(t, got, &second)
+	decodeSuccessfulResponse(t, got, &second)
 	if second.Rules[0].ID != first.Rules[1].ID || second.Rules[1].ID != first.Rules[0].ID {
 		t.Fatalf("reorder did not keep ids in the new order: %+v", second.Rules)
 	}
@@ -85,7 +85,7 @@ func TestTagRulesRefusals(t *testing.T) {
 	otherBoardID := mkBoard(t, h, "Other")
 	w := putTagRules(t, h, otherBoardID, []model.BoardTagRuleInput{{Tags: []string{"a"}, DefaultInstanceID: knownInstanceID}})
 	var other model.BoardTagRules
-	decode(t, w, &other)
+	decodeSuccessfulResponse(t, w, &other)
 
 	for name, check := range map[string]struct {
 		rules []model.BoardTagRuleInput
@@ -161,7 +161,7 @@ func TestEffectiveDefaultsPrecedence(t *testing.T) {
 		t.Fatalf("rules: %d %s", w.Code, w.Body.String())
 	}
 	var rules model.BoardTagRules
-	decode(t, w, &rules)
+	decodeSuccessfulResponse(t, w, &rules)
 	narrow, broad := rules.Rules[0], rules.Rules[1]
 
 	both := effectiveFor(t, h, boardID, "urgency:high", "cat:product")
@@ -216,14 +216,14 @@ func TestCardEffectiveDefaultsReadTheCardsTagsFromNoteboard(t *testing.T) {
 	}
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "tagged", ColumnID: columnID, Tags: []string{"cat:product", "email"}})
 	var card model.CardView
-	decode(t, w, &card)
+	decodeSuccessfulResponse(t, w, &card)
 
 	w = do(t, h, "GET", "/api/boards/"+boardID+"/cards/"+card.Placement.CardID+"/effective-defaults", nil)
 	if w.Code != 200 {
 		t.Fatalf("card effective defaults: %d %s", w.Code, w.Body.String())
 	}
 	var resolved model.EffectiveDefaults
-	decode(t, w, &resolved)
+	decodeSuccessfulResponse(t, w, &resolved)
 	if resolved.CardID != card.Placement.CardID || len(resolved.Tags) != 2 {
 		t.Fatalf("resolution did not carry the card and its tags: %+v", resolved)
 	}
@@ -251,11 +251,11 @@ func TestATagRulesPrincipalIsAppliedOnArrival(t *testing.T) {
 		t.Fatalf("rules: %d %s", w.Code, w.Body.String())
 	}
 	var rules model.BoardTagRules
-	decode(t, w, &rules)
+	decodeSuccessfulResponse(t, w, &rules)
 
 	w = do(t, h, "POST", "/api/boards/"+boardID+"/cards?actor=email-classifier", model.CreateCardRequest{Title: "product", ColumnID: columnID, Tags: []string{"cat:product"}})
 	var tagged model.CardView
-	decode(t, w, &tagged)
+	decodeSuccessfulResponse(t, w, &tagged)
 	if len(tagged.Assignments) != 1 || tagged.Assignments[0].PrincipalID != otherActivePrincipal {
 		t.Fatalf("tagged card: assignments %+v, want the rule's principal", tagged.Assignments)
 	}
@@ -270,7 +270,7 @@ func TestATagRulesPrincipalIsAppliedOnArrival(t *testing.T) {
 
 	w = do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "plain", ColumnID: columnID})
 	var plain model.CardView
-	decode(t, w, &plain)
+	decodeSuccessfulResponse(t, w, &plain)
 	if len(plain.Assignments) != 1 || plain.Assignments[0].PrincipalID != activePrincipal {
 		t.Fatalf("untagged card: assignments %+v, want the board's principal", plain.Assignments)
 	}
@@ -280,13 +280,13 @@ func TestATagRulesPrincipalIsAppliedOnArrival(t *testing.T) {
 	sourceColumn := mkColumn(t, h, sourceBoard, "Todo", "")
 	w = do(t, h, "POST", "/api/boards/"+sourceBoard+"/cards", model.CreateCardRequest{Title: "moving", ColumnID: sourceColumn, Tags: []string{"cat:product"}})
 	var moving model.CardView
-	decode(t, w, &moving)
+	decodeSuccessfulResponse(t, w, &moving)
 	if w := do(t, h, "PUT", "/api/boards/"+boardID+"/cards/"+moving.Placement.CardID, model.AttachCardRequest{ColumnID: columnID}); w.Code != 201 {
 		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
 	}
 	w = do(t, h, "GET", "/api/cards/"+moving.Placement.CardID+"/assignments", nil)
 	var assignments []model.CardAssignment
-	decode(t, w, &assignments)
+	decodeSuccessfulResponse(t, w, &assignments)
 	if len(assignments) != 1 || assignments[0].PrincipalID != otherActivePrincipal {
 		t.Fatalf("attached tagged card: assignments %+v, want the rule's principal", assignments)
 	}

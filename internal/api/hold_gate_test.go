@@ -32,7 +32,7 @@ func TestHoldParksTheCardAndUnholdReleasesIt(t *testing.T) {
 		t.Fatalf("create card: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 
 	if nb.heldAt(cardID) != "" {
@@ -71,7 +71,7 @@ func TestHoldGateRejectsNonPostAndSurfacesUpstreamFailure(t *testing.T) {
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards",
 		model.CreateCardRequest{Title: "a card", ColumnID: colID})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 
 	// A gate a GET can close is not a gate: a link-follower or a prefetch would

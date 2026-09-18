@@ -659,7 +659,7 @@ func linkTestCard(t *testing.T, h http.Handler) string {
 		t.Fatalf("create card: %d %s", w.Code, w.Body.String())
 	}
 	var card model.CardView
-	decode(t, w, &card)
+	decodeSuccessfulResponse(t, w, &card)
 	return card.Placement.CardID
 }
 

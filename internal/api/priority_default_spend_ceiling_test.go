@@ -39,7 +39,7 @@ func TestLadderStoresDefaultSpendCeiling(t *testing.T) {
 	mkLadderWithDefaultCeilings(t, h, boardID, 20, 2)
 
 	var ladder model.PriorityLadder
-	decode(t, do(t, h, "GET", "/api/boards/"+boardID+"/priority-levels", nil), &ladder)
+	decodeSuccessfulResponse(t, do(t, h, "GET", "/api/boards/"+boardID+"/priority-levels", nil), &ladder)
 	if got := ladder.Levels[0].DefaultAutoHoldAtUSD; got == nil || *got != 20 {
 		t.Errorf("P0 default = %v, want 20", got)
 	}
@@ -64,9 +64,9 @@ func TestCreatedCardTakesItsRungsDefaultSpendCeiling(t *testing.T) {
 
 	top := 5
 	var defaulted, handSet, unranked model.CardView
-	decode(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "a", ColumnID: col, Priority: &top}), &defaulted)
-	decode(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "b", ColumnID: col, Priority: &top, AutoHoldAtUSD: dollars(0)}), &handSet)
-	decode(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "c", ColumnID: col}), &unranked)
+	decodeSuccessfulResponse(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "a", ColumnID: col, Priority: &top}), &defaulted)
+	decodeSuccessfulResponse(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "b", ColumnID: col, Priority: &top, AutoHoldAtUSD: dollars(0)}), &handSet)
+	decodeSuccessfulResponse(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "c", ColumnID: col}), &unranked)
 
 	if got := ceilingOf(t, nb, defaulted.Placement.CardID); got != 20.0 {
 		t.Errorf("P0 card ceiling = %v, want 20", got)
@@ -88,7 +88,7 @@ func TestPriorityChangeMovesADefaultedCeilingButNotAHandSetOne(t *testing.T) {
 
 	low := 2
 	var card model.CardView
-	decode(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "a", ColumnID: col, Priority: &low}), &card)
+	decodeSuccessfulResponse(t, do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "a", ColumnID: col, Priority: &low}), &card)
 	cardID := card.Placement.CardID
 	if got := ceilingOf(t, nb, cardID); got != 2.0 {
 		t.Fatalf("P3 card ceiling = %v, want 2", got)

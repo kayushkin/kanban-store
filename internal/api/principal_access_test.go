@@ -162,18 +162,18 @@ func buildTwoBoards(t *testing.T, h http.Handler, grants *fakeGrantStore) twoBoa
 		w := requestAs(t, h, asService, "POST", "/api/boards", model.CreateBoardRequest{Name: name})
 		mustStatus(t, w, 201, "service creates board")
 		var board model.Board
-		decode(t, w, &board)
+		decodeSuccessfulResponse(t, w, &board)
 		w = requestAs(t, h, asService, "POST", "/api/boards/"+board.ID+"/columns", model.CreateColumnRequest{Name: "Open"})
 		mustStatus(t, w, 201, "service creates column")
 		var column model.Column
-		decode(t, w, &column)
+		decodeSuccessfulResponse(t, w, &column)
 		return board.ID, column.ID
 	}
 	makeCard := func(boardID, columnID, title string) string {
 		w := requestAs(t, h, asService, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: title, ColumnID: columnID})
 		mustStatus(t, w, 201, "service creates card")
 		var card model.CardView
-		decode(t, w, &card)
+		decodeSuccessfulResponse(t, w, &card)
 		return card.Placement.CardID
 	}
 	f.supportBoardID, f.supportColumnID = makeBoard("Support")
@@ -193,7 +193,7 @@ func buildTwoBoards(t *testing.T, h http.Handler, grants *fakeGrantStore) twoBoa
 func boardIDsIn(t *testing.T, w *httptest.ResponseRecorder) []string {
 	t.Helper()
 	var boards []model.Board
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	ids := []string{}
 	for _, board := range boards {
 		ids = append(ids, board.ID)
@@ -244,7 +244,7 @@ func TestPrincipalSeesOnlyBoardsItHoldsAGrantOn(t *testing.T) {
 	w = requestAs(t, h, asPrincipal(alice), "GET", "/api/cards/"+f.sharedCardID+"/placements", nil)
 	mustStatus(t, w, 200, "alice reads shared card placements")
 	var placements []model.Placement
-	decode(t, w, &placements)
+	decodeSuccessfulResponse(t, w, &placements)
 	if len(placements) != 1 || placements[0].BoardID != f.supportBoardID {
 		t.Fatalf("alice should see only the Support placement, got %+v", placements)
 	}
@@ -286,7 +286,7 @@ func TestPrincipalListsAreFiltered(t *testing.T) {
 	w := requestAs(t, h, asPrincipal(alice), "GET", "/api/assignments?principal_id="+carol, nil)
 	mustStatus(t, w, 200, "alice lists carol's assignments")
 	var assignments []model.CardAssignment
-	decode(t, w, &assignments)
+	decodeSuccessfulResponse(t, w, &assignments)
 	if len(assignments) != 1 || assignments[0].CardID != f.supportCardID {
 		t.Fatalf("alice should see only carol's Support assignment, got %+v", assignments)
 	}
@@ -297,7 +297,7 @@ func TestPrincipalListsAreFiltered(t *testing.T) {
 		w := requestAs(t, h, asPrincipal(principalID), "GET", "/api/search?q="+query, nil)
 		mustStatus(t, w, 200, principalID+" searches "+query)
 		var items []map[string]any
-		decode(t, w, &items)
+		decodeSuccessfulResponse(t, w, &items)
 		titles := []string{}
 		for _, item := range items {
 			titles = append(titles, item["title"].(string))
@@ -325,7 +325,7 @@ func TestPrincipalCreatingABoardAdministersIt(t *testing.T) {
 	w = requestAs(t, h, asPrincipal(bob), "POST", "/api/boards", model.CreateBoardRequest{Name: "Bob's"})
 	mustStatus(t, w, 201, "bob creates a board")
 	var board model.Board
-	decode(t, w, &board)
+	decodeSuccessfulResponse(t, w, &board)
 	mustStatus(t, requestAs(t, h, asPrincipal(bob), "PATCH", "/api/boards/"+board.ID, map[string]any{"name": "Bob's board"}), 200, "bob administers what he created")
 
 	grants.mu.Lock()
@@ -334,7 +334,7 @@ func TestPrincipalCreatingABoardAdministersIt(t *testing.T) {
 	mustStatus(t, requestAs(t, h, asPrincipal(bob), "POST", "/api/boards", model.CreateBoardRequest{Name: "Orphan"}), 502, "grant refused")
 	w = requestAs(t, h, asService, "GET", "/api/boards", nil)
 	var boards []model.Board
-	decode(t, w, &boards)
+	decodeSuccessfulResponse(t, w, &boards)
 	for _, listed := range boards {
 		if listed.Name == "Orphan" {
 			t.Fatalf("a board whose creator grant failed must not remain: %+v", boards)
@@ -350,7 +350,7 @@ func TestPrincipalIsTheActorWhateverTheQuerySays(t *testing.T) {
 	w := requestAs(t, h, asPrincipal(alice), "GET", "/api/cards/"+f.supportCardID+"/events", nil)
 	mustStatus(t, w, 200, "alice reads events")
 	var events []model.CardEvent
-	decode(t, w, &events)
+	decodeSuccessfulResponse(t, w, &events)
 	last := events[len(events)-1]
 	if last.Kind != model.EventCardMoved || last.Actor != alice {
 		t.Fatalf("the move should be logged as alice, got %+v", last)

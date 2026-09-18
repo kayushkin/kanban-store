@@ -102,7 +102,7 @@ func mkTriggerCard(t *testing.T, h http.Handler, boardID, columnID, title string
 		t.Fatalf("create card: %d %s", w.Code, w.Body.String())
 	}
 	var view model.CardView
-	decode(t, w, &view)
+	decodeSuccessfulResponse(t, w, &view)
 	return view.Placement.CardID
 }
 
@@ -113,7 +113,7 @@ func mkMessageTrigger(t *testing.T, h http.Handler, boardID string, body map[str
 		t.Fatalf("create trigger: %d %s", w.Code, w.Body.String())
 	}
 	var trigger model.MessageTrigger
-	decode(t, w, &trigger)
+	decodeSuccessfulResponse(t, w, &trigger)
 	return trigger
 }
 
@@ -128,7 +128,7 @@ func waitForMessageDeliveries(t *testing.T, h http.Handler, boardID string, coun
 			t.Fatalf("list deliveries: %d %s", w.Code, w.Body.String())
 		}
 		var deliveries []model.MessageDelivery
-		decode(t, w, &deliveries)
+		decodeSuccessfulResponse(t, w, &deliveries)
 		if len(deliveries) > count {
 			t.Fatalf("expected %d deliveries, got %d: %+v", count, len(deliveries), deliveries)
 		}
@@ -206,7 +206,7 @@ func TestMessageTriggerWriteIsCheckedAgainstTheBoard(t *testing.T) {
 
 	w := do(t, h, "PATCH", "/api/message-triggers/"+created.ID, map[string]any{"enabled": false})
 	var patched model.MessageTrigger
-	decode(t, w, &patched)
+	decodeSuccessfulResponse(t, w, &patched)
 	if w.Code != 200 || patched.Enabled || patched.Name != "P0 created" || patched.PriorityValue == nil {
 		t.Fatalf("patch enabled=false: %d %+v", w.Code, patched)
 	}
@@ -214,7 +214,7 @@ func TestMessageTriggerWriteIsCheckedAgainstTheBoard(t *testing.T) {
 	// A fresh struct: a cleared priority is absent from the body, and decoding
 	// into the previous response would leave its old value in place.
 	var cleared model.MessageTrigger
-	decode(t, w, &cleared)
+	decodeSuccessfulResponse(t, w, &cleared)
 	if w.Code != 200 || cleared.PriorityValue != nil || cleared.PriorityLabel != "" || cleared.Enabled {
 		t.Fatalf("patch clear_priority: %d %+v", w.Code, cleared)
 	}
@@ -235,7 +235,7 @@ func TestMessageTriggerWriteIsCheckedAgainstTheBoard(t *testing.T) {
 		TemplateFields     []string `json:"template_fields"`
 		DeliveryConfigured bool     `json:"delivery_configured"`
 	}
-	decode(t, w, &options)
+	decodeSuccessfulResponse(t, w, &options)
 	if options.DeliveryConfigured || !contains(options.EventKinds, "card_created") || !contains(options.TemplateFields, "Title") {
 		t.Errorf("options: %+v", options)
 	}

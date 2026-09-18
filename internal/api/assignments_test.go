@@ -68,7 +68,7 @@ func assignmentTestCard(t *testing.T, h http.Handler) (boardID, columnID, cardID
 		t.Fatalf("create card: %d %s", w.Code, w.Body.String())
 	}
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	return boardID, columnID, cv.Placement.CardID
 }
 
@@ -79,7 +79,7 @@ func eventsOfKind(t *testing.T, h http.Handler, cardID string, kind model.EventK
 		t.Fatalf("events: %d %s", w.Code, w.Body.String())
 	}
 	var all []model.CardEvent
-	decode(t, w, &all)
+	decodeSuccessfulResponse(t, w, &all)
 	var out []model.CardEvent
 	for _, e := range all {
 		if e.Kind == kind {
@@ -102,7 +102,7 @@ func TestAssignIsIdempotent(t *testing.T) {
 		t.Fatalf("first PUT: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var first model.CardAssignment
-	decode(t, w, &first)
+	decodeSuccessfulResponse(t, w, &first)
 	if first.CardID != cardID || first.PrincipalID != activePrincipal || first.AssignedBy != "lead" || first.CreatedAt.IsZero() {
 		t.Fatalf("unexpected assignment row: %+v", first)
 	}
@@ -112,14 +112,14 @@ func TestAssignIsIdempotent(t *testing.T) {
 		t.Fatalf("repeat PUT: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var second model.CardAssignment
-	decode(t, w, &second)
+	decodeSuccessfulResponse(t, w, &second)
 	if second.AssignedBy != "lead" || !second.CreatedAt.Equal(first.CreatedAt) {
 		t.Fatalf("repeat PUT rewrote the row: first %+v, second %+v", first, second)
 	}
 
 	w = do(t, h, "GET", "/api/cards/"+cardID+"/assignments", nil)
 	var list []model.CardAssignment
-	decode(t, w, &list)
+	decodeSuccessfulResponse(t, w, &list)
 	if len(list) != 1 {
 		t.Fatalf("expected exactly one assignment, got %d", len(list))
 	}
@@ -237,7 +237,7 @@ func TestAssignmentsAppearInBoardAndColumnViews(t *testing.T) {
 		t.Fatalf("board view: %d %s", w.Code, w.Body.String())
 	}
 	var board model.BoardView
-	decode(t, w, &board)
+	decodeSuccessfulResponse(t, w, &board)
 	if len(board.Columns) != 1 || len(board.Columns[0].Cards) != 1 {
 		t.Fatalf("expected one card in one column, got %+v", board.Columns)
 	}
@@ -250,7 +250,7 @@ func TestAssignmentsAppearInBoardAndColumnViews(t *testing.T) {
 		t.Fatalf("column cards: %d %s", w.Code, w.Body.String())
 	}
 	var column model.ColumnView
-	decode(t, w, &column)
+	decodeSuccessfulResponse(t, w, &column)
 	if len(column.Cards) != 1 {
 		t.Fatalf("expected one card, got %d", len(column.Cards))
 	}
@@ -264,7 +264,7 @@ func TestAssignmentsAppearInBoardAndColumnViews(t *testing.T) {
 	}
 	w = do(t, h, "GET", "/api/boards/"+boardID+"/cards", nil)
 	var raw map[string]any
-	decode(t, w, &raw)
+	decodeSuccessfulResponse(t, w, &raw)
 	card := raw["columns"].([]any)[0].(map[string]any)["cards"].([]any)[0].(map[string]any)
 	if _, present := card["assignments"]; present {
 		t.Fatalf("assignments should be omitted when empty, got %v", card["assignments"])
@@ -277,7 +277,7 @@ func TestAssignmentsReverseLookupByPrincipal(t *testing.T) {
 	boardID, columnID, firstCard := assignmentTestCard(t, h)
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "second", ColumnID: columnID})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	secondCard := cv.Placement.CardID
 
 	for _, cardID := range []string{firstCard, secondCard} {
@@ -294,7 +294,7 @@ func TestAssignmentsReverseLookupByPrincipal(t *testing.T) {
 		t.Fatalf("reverse lookup: %d %s", w.Code, w.Body.String())
 	}
 	var list []model.CardAssignment
-	decode(t, w, &list)
+	decodeSuccessfulResponse(t, w, &list)
 	if len(list) != 2 || list[0].CardID != firstCard || list[1].CardID != secondCard {
 		t.Fatalf("expected [%s %s] oldest first, got %+v", firstCard, secondCard, list)
 	}
@@ -317,7 +317,7 @@ func TestAssignmentEventsCarryTheClockForwardUnchanged(t *testing.T) {
 
 	w := do(t, h, "POST", "/api/boards/"+boardID+"/cards", model.CreateCardRequest{Title: "waiting", ColumnID: blocked})
 	var cv model.CardView
-	decode(t, w, &cv)
+	decodeSuccessfulResponse(t, w, &cv)
 	cardID := cv.Placement.CardID
 
 	if w := do(t, h, "PUT", "/api/cards/"+cardID+"/assignments/"+activePrincipal+"?actor=lead", nil); w.Code != 201 {
@@ -344,7 +344,7 @@ func TestAssignmentEventsCarryTheClockForwardUnchanged(t *testing.T) {
 	var tl struct {
 		Summary model.CardTimeSummary `json:"summary"`
 	}
-	decode(t, w, &tl)
+	decodeSuccessfulResponse(t, w, &tl)
 	if tl.Summary.ClockState != model.ClockPaused || tl.Summary.BudgetClockSeconds != 0 {
 		t.Fatalf("assignment moved the clock: %+v", tl.Summary)
 	}
@@ -362,7 +362,7 @@ func TestAssignmentEventsCarryTheClockForwardUnchanged(t *testing.T) {
 		t.Fatalf("unassigned on a finished card must stay stopped, got %+v", unassigned)
 	}
 	w = do(t, h, "GET", "/api/cards/"+cardID+"/timeline?board_id="+boardID, nil)
-	decode(t, w, &tl)
+	decodeSuccessfulResponse(t, w, &tl)
 	if tl.Summary.ClockState != model.ClockStopped {
 		t.Fatalf("unassign restarted a finished card: %+v", tl.Summary)
 	}
@@ -403,7 +403,7 @@ func TestAssigningACardWithNoHistoryTakesItsColumnsClock(t *testing.T) {
 	var tl struct {
 		Summary model.CardTimeSummary `json:"summary"`
 	}
-	decode(t, w, &tl)
+	decodeSuccessfulResponse(t, w, &tl)
 	if tl.Summary.ClockState != model.ClockStopped || tl.Summary.BudgetClockSeconds != 0 || tl.Summary.ElapsedSeconds != 0 {
 		t.Fatalf("assigning a finished legacy card started its clock: %+v", tl.Summary)
 	}
@@ -439,7 +439,7 @@ func TestEntityTypesIncludePrincipal(t *testing.T) {
 	defer cleanup()
 	w := do(t, h, "GET", "/api/entity-types", nil)
 	var types []model.EntityTypeInfo
-	decode(t, w, &types)
+	decodeSuccessfulResponse(t, w, &types)
 	for _, et := range types {
 		if et.Type != "principal" {
 			continue
