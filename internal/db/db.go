@@ -120,7 +120,10 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_entity_tags_tag    ON entity_tags(tag);
 		CREATE INDEX IF NOT EXISTS idx_entity_tags_entity ON entity_tags(entity_type, entity_ref);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	return ensureTicketTables(db)
 }
 
 func now() time.Time { return time.Now().UTC() }
@@ -348,6 +351,7 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 		WIPLimit:         req.WIPLimit,
 		AutoStatus:       req.AutoStatus,
 		BudgetClockState: req.BudgetClockState,
+		LifecycleState:   lifecycleStateFromRequest(req.LifecycleState),
 		CreatedAt:        now(),
 		UpdatedAt:        now(),
 	}
@@ -355,9 +359,10 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 		c.Color = *req.Color
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState), c.CreatedAt, c.UpdatedAt,
+		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState),
+		lifecycleStateValue(c.LifecycleState), c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -367,7 +372,7 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 
 func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 	rows, err := s.db.Query(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at
 		 FROM columns WHERE board_id = ? ORDER BY position ASC`, boardID,
 	)
 	if err != nil {
@@ -387,7 +392,7 @@ func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 
 func (s *Store) GetColumn(id string) (*model.Column, error) {
 	row := s.db.QueryRow(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at
 		 FROM columns WHERE id = ?`, id,
 	)
 	c, err := scanColumn(row)
@@ -404,9 +409,13 @@ type scanner interface {
 func scanColumn(r scanner) (*model.Column, error) {
 	c := &model.Column{}
 	var wip sql.NullInt64
-	var auto, clock sql.NullString
-	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &clock, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	var auto, clock, lifecycle sql.NullString
+	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &clock, &lifecycle, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if lifecycle.Valid && lifecycle.String != "" {
+		state := model.TicketLifecycleState(lifecycle.String)
+		c.LifecycleState = &state
 	}
 	if clock.Valid && clock.String != "" {
 		v := model.ClockState(clock.String)
@@ -452,10 +461,16 @@ func (s *Store) UpdateColumn(id string, req *model.UpdateColumnRequest) (*model.
 			c.BudgetClockState = req.BudgetClockState
 		}
 	}
+	if req.LifecycleState != nil {
+		// An empty string clears it, and every ticket in the column then
+		// reports no lifecycle rather than a stale one.
+		c.LifecycleState = lifecycleStateFromRequest(req.LifecycleState)
+	}
 	c.UpdatedAt = now()
 	_, err = s.db.Exec(
-		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, budget_clock_state=?, updated_at=? WHERE id=?`,
-		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState), c.UpdatedAt, id,
+		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, budget_clock_state=?, lifecycle_state=?, updated_at=? WHERE id=?`,
+		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState),
+		lifecycleStateValue(c.LifecycleState), c.UpdatedAt, id,
 	)
 	return c, err
 }

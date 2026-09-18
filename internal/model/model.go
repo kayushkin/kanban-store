@@ -160,8 +160,13 @@ type Column struct {
 	// move here says nothing about the clock and leaves it as it was — which is the
 	// honest default for a column nobody has classified.
 	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
-	CreatedAt        time.Time   `json:"created_at"`
-	UpdatedAt        time.Time   `json:"updated_at"`
+	// LifecycleState is what sitting in this column means for a ticket: new,
+	// open, waiting on the requester, resolved or closed. Absent means this
+	// column has not been classified, and a ticket here reports no state
+	// rather than a guessed one — see model/ticket.go.
+	LifecycleState *TicketLifecycleState `json:"lifecycle_state,omitempty"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
 type CreateColumnRequest struct {
@@ -171,11 +176,16 @@ type CreateColumnRequest struct {
 	WIPLimit         *int        `json:"wip_limit,omitempty"`
 	AutoStatus       *string     `json:"auto_status,omitempty"`
 	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
+	// LifecycleState classifies the column for tickets; see Column.
+	LifecycleState *string `json:"lifecycle_state,omitempty"`
 }
 
 func (r *CreateColumnRequest) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("name is required")
+	}
+	if err := validateLifecycleStateField(r.LifecycleState); err != nil {
+		return err
 	}
 	if r.AutoStatus != nil && !validStatus(*r.AutoStatus) {
 		return fmt.Errorf("auto_status must be one of: open, done, archived")
@@ -194,6 +204,9 @@ type UpdateColumnRequest struct {
 	AutoStatus *string  `json:"auto_status,omitempty"`
 	// BudgetClockState reclassifies the column. An empty string clears it.
 	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
+	// LifecycleState reclassifies the column for tickets. An empty string
+	// clears it, which makes every ticket in the column report no state.
+	LifecycleState *string `json:"lifecycle_state,omitempty"`
 }
 
 func (r *UpdateColumnRequest) Validate() error {
@@ -202,6 +215,22 @@ func (r *UpdateColumnRequest) Validate() error {
 	}
 	if r.BudgetClockState != nil && *r.BudgetClockState != "" && !ValidClockState(*r.BudgetClockState) {
 		return fmt.Errorf("budget_clock_state must be one of: %s", strings.Join(ClockStateNames(), ", "))
+	}
+	if err := validateLifecycleStateField(r.LifecycleState); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateLifecycleStateField accepts absent (leave it alone), empty (clear
+// it) and any state the vocabulary names; anything else is refused naming the
+// whole vocabulary.
+func validateLifecycleStateField(raw *string) error {
+	if raw == nil || *raw == "" {
+		return nil
+	}
+	if _, ok := NormalizeTicketLifecycleState(*raw); !ok {
+		return ErrUnknownTicketLifecycleState(*raw)
 	}
 	return nil
 }
@@ -408,6 +437,10 @@ type CardView struct {
 	Item        any              `json:"item" tstype:"NoteboardItem | null"`
 	Links       []CardLink       `json:"links,omitempty"`
 	Assignments []CardAssignment `json:"assignments,omitempty"`
+	// Ticket is present when this card came from outside; absent on an
+	// ordinary card. The lifecycle is not repeated here — it is the column
+	// this very placement names, which the reader already has.
+	Ticket *Ticket `json:"ticket,omitempty"`
 	// AutoStatusApplied and AutoStatusError report the second write a card
 	// creation makes: when the destination column carries auto_status, the
 	// noteboard item is PATCHed to match. That write can fail on its own after

@@ -14,8 +14,9 @@ import (
 // ============================ Stub principal-store ============================
 
 // fakePrincipalStore stands in for principal-store's GET /principals/{id}. It
-// knows two principals — one active, one disabled — and 404s on everything
-// else, which is all the assignment write path ever asks it.
+// knows a handful of principals — active humans, one disabled, one
+// administrator and one contact — and 404s on everything else. The kind
+// matters to the ticket write path: a requester must be a contact.
 type fakePrincipalStore struct {
 	disabledAtByID map[string]int64
 	requests       atomic.Int64
@@ -26,6 +27,10 @@ const (
 	otherActivePrincipal = "principal_000003"
 	disabledPrincipal    = "principal_000002"
 	unknownPrincipal     = "principal_000099"
+	// requesterContact is the outside person a ticket is from; disabledContact
+	// is one principal-store has retired.
+	requesterContact = "principal_000010"
+	disabledContact  = "principal_000011"
 )
 
 func newFakePrincipalStore() *fakePrincipalStore {
@@ -36,7 +41,17 @@ func newFakePrincipalStore() *fakePrincipalStore {
 		"principal_000004":      0,
 		"principal_000005":      0,
 		deploymentAdministrator: 0,
+		requesterContact:        0,
+		disabledContact:         1_757_000_000,
 	}}
+}
+
+// kindOf answers what fakePrincipalStore says a principal is.
+func kindOf(id string) string {
+	if id == requesterContact || id == disabledContact {
+		return "contact"
+	}
+	return "human"
 }
 
 func (f *fakePrincipalStore) handler() http.Handler {
@@ -50,7 +65,7 @@ func (f *fakePrincipalStore) handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, map[string]any{
-			"id": id, "kind": "human", "display_name": "Test Person", "email": "test@example.com",
+			"id": id, "kind": kindOf(id), "display_name": "Test Person", "email": "test@example.com",
 			"disabled_at": disabledAt, "is_administrator": id == deploymentAdministrator,
 		})
 	})

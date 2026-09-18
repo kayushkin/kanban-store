@@ -397,3 +397,40 @@ func TestAnAdministratorSeesEveryBoard(t *testing.T) {
 		t.Fatalf("the administrator should hold no board grants, has %d", held)
 	}
 }
+
+// TestTicketRoutesFollowTheSameBoardRules pins that a ticket is card content:
+// reading one needs can_view on a board the card sits on, and writing one
+// needs can_edit, exactly as every other card write does.
+func TestTicketRoutesFollowTheSameBoardRules(t *testing.T) {
+	h, grants, _ := setupWithPrincipalEnforcement(t)
+	f := buildTwoBoards(t, h, grants)
+
+	// The service files a ticket on the Support card.
+	mustStatus(t, requestAs(t, h, asService, "PUT", "/api/cards/"+f.supportCardID+"/ticket",
+		model.TicketWriteRequest{RequesterPrincipalID: requesterContact, Channel: "email"}), 200, "service writes a ticket")
+
+	// alice holds can_edit on Support: she reads it and may change it.
+	mustStatus(t, requestAs(t, h, asPrincipal(alice), "GET", "/api/cards/"+f.supportCardID+"/ticket", nil),
+		200, "alice reads a ticket on her board")
+	mustStatus(t, requestAs(t, h, asPrincipal(alice), "PUT", "/api/cards/"+f.supportCardID+"/ticket",
+		model.TicketWriteRequest{RequesterPrincipalID: requesterContact, Channel: "phone"}), 200, "alice rewrites it")
+
+	// bob holds nothing on Support: the ticket is as invisible as the card.
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "GET", "/api/cards/"+f.supportCardID+"/ticket", nil),
+		404, "bob reads a ticket on a board he cannot see")
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "PUT", "/api/cards/"+f.supportCardID+"/ticket",
+		model.TicketWriteRequest{RequesterPrincipalID: requesterContact, Channel: "chat"}), 404, "bob writes it")
+
+	// A view-only principal on Finance may read that board's ticket and not write it.
+	mustStatus(t, requestAs(t, h, asService, "PUT", "/api/cards/"+f.financeCardID+"/ticket",
+		model.TicketWriteRequest{RequesterPrincipalID: requesterContact, Channel: "portal"}), 200, "service writes a Finance ticket")
+	grants.give(bob, "can_view", f.financeBoardID)
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "GET", "/api/cards/"+f.financeCardID+"/ticket", nil),
+		200, "bob reads the Finance ticket he can view")
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "DELETE", "/api/cards/"+f.financeCardID+"/ticket", nil),
+		403, "a viewer deletes a ticket")
+
+	// The vocabularies need no board at all.
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "GET", "/api/ticket-channels", nil), 200, "channels")
+	mustStatus(t, requestAs(t, h, asPrincipal(bob), "GET", "/api/ticket-lifecycle-states", nil), 200, "lifecycle states")
+}

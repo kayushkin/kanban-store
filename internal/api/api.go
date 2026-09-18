@@ -74,6 +74,10 @@ func (a *API) Handler() http.Handler {
 	// reverse lookup by principal: every card someone is assigned to
 	mux.HandleFunc("/api/assignments", a.assignmentsByPrincipal)
 
+	// ticket vocabularies: what a channel and a lifecycle state may be
+	mux.HandleFunc("/api/ticket-channels", a.ticketChannels)
+	mux.HandleFunc("/api/ticket-lifecycle-states", a.ticketLifecycleStates)
+
 	// entity-type registry & cross-entity tag listing
 	mux.HandleFunc("/api/entity-types", a.entityTypes)
 	mux.HandleFunc("/api/tags", a.allTags)
@@ -698,6 +702,9 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	case "timeline":
 		a.cardTimeline(w, r, cardID)
 		return
+	case "ticket":
+		a.cardTicket(w, r, cardID)
+		return
 	case "assignments":
 		if len(parts) == 2 {
 			a.cardAssignments(w, r, cardID)
@@ -1246,6 +1253,12 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 	if err != nil {
 		return nil, err
 	}
+	// One query for every ticket on screen, like the links and assignments
+	// above: a board of 6,000 cards must not become 6,000 reads.
+	ticketsByCard, err := a.store.ListTicketsForCards(ids)
+	if err != nil {
+		return nil, err
+	}
 	ladder, err := a.store.GetPriorityLadder(boardID)
 	if err != nil {
 		return nil, err
@@ -1258,6 +1271,7 @@ func (a *API) assembleBoardView(boardID string, limit int) (*model.BoardView, er
 	for i, p := range placements {
 		cv := model.CardView{
 			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Assignments: assignmentsByCard[p.CardID],
+			Ticket: ticketsByCard[p.CardID],
 		}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],

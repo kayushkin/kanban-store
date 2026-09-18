@@ -45,9 +45,19 @@ func New(baseURL string) *Client {
 // Principal is the part of principal-store's record the existence check reads.
 // DisabledAt is principal-store's unix-seconds stamp; 0 means the principal is
 // active, and principal-store never deletes a row, so this is the only removal.
+// KindContact is principal-store's kind for the outside person a ticket came
+// from. Spelled here because this store reads it on the ticket write path; the
+// vocabulary itself is principal-store's, served at GET /kinds.
+const KindContact = "contact"
+
 type Principal struct {
-	ID         string `json:"id"`
-	DisabledAt int64  `json:"disabled_at"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// DisplayName is carried for rendering a board without a second fetch per
+	// card. Nothing joins on it — the id is the handle — and it is stale the
+	// moment principal-store renames the principal.
+	DisplayName string `json:"display_name"`
+	DisabledAt  int64  `json:"disabled_at"`
 	// IsAdministrator is principal-store's one fact about a person that this
 	// store acts on: an administrator sees and changes every board, granted or
 	// not. See internal/api/principal_access.go.

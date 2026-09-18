@@ -631,6 +631,42 @@ compiles green and panics at boot.
 
 MIT — see [LICENSE](LICENSE).
 
+## Tickets
+
+A ticket is a card that came from outside. The card is still the card — title,
+body and tags in noteboard, placement and history here — and the ticket adds
+the two facts a card has no room for:
+
+| Field | Meaning |
+|---|---|
+| `requester_principal_id` | the principal-store **contact** who asked. Checked on write: an unknown or disabled principal is a 400, a principal-store that cannot answer is a 502 and nothing is written, and a `human` or `group` is a 400 telling the caller to resolve the address with principal-store's `POST /contacts/resolve` first |
+| `channel` | how it reached us, from `GET /api/ticket-channels` — email, portal, chat, phone, agent. Anything else is a 400 naming the vocabulary |
+
+**There is no status field.** A ticket's lifecycle is the column it sits in: a
+column carries `lifecycle_state` from `GET /api/ticket-lifecycle-states` (new,
+open, waiting_on_requester, resolved, closed), and moving the card is what
+changes the ticket's state. A second writable status would disagree with the
+column within a week.
+
+A column nobody classified reports **no** state rather than a guessed one —
+starting an SLA clock on a guess is worse than reporting nothing — and a card
+that sits on two boards answers **both** states, naming each board and column,
+because the mail board and the team board can disagree and this store does not
+pick between them.
+
+| Route | |
+|---|---|
+| `GET /api/cards/{id}/ticket` | the ticket, the requester's display name (for rendering only; the id is the handle) and one state per placement. 404 when the card is not a ticket |
+| `PUT /api/cards/{id}/ticket` | upsert; an unknown field is a 400, not a silent drop |
+| `DELETE /api/cards/{id}/ticket` | the card stops being a ticket and stays exactly where it is |
+| `GET /api/ticket-channels`, `GET /api/ticket-lifecycle-states` | the vocabularies |
+
+A board view carries each card's ticket, read in one query with the links and
+assignments, so a board of thousands of cards is not thousands of reads.
+Reading a ticket needs `can_view` on a board the card sits on and writing one
+needs `can_edit` on every board it sits on — the same rule as any other card
+write.
+
 ## Who may see which board
 
 There is no off switch: a store that cannot authorize a caller does not serve
