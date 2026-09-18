@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -261,7 +262,18 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		if req.BusinessHours.TZID == "" {
 			b.BusinessHours = nil
 		} else {
-			b.BusinessHours = req.BusinessHours
+			replacement := *req.BusinessHours
+			// Holidays absent from the request are kept, not cleared; a list that
+			// is present, even empty, replaces them. See BusinessHours.Holidays.
+			if replacement.Holidays == nil && b.BusinessHours != nil {
+				replacement.Holidays = b.BusinessHours.Holidays
+			}
+			replacement.Holidays = append([]string(nil), replacement.Holidays...)
+			sort.Strings(replacement.Holidays)
+			if len(replacement.Holidays) == 0 {
+				replacement.Holidays = nil
+			}
+			b.BusinessHours = &replacement
 		}
 	}
 	if req.DefaultPrincipalID != nil {

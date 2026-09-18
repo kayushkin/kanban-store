@@ -205,3 +205,52 @@ func TestLadderRejectsLevelAtZero(t *testing.T) {
 		t.Fatal("a level at priority_value 0 was accepted; unranked cards would become P0")
 	}
 }
+
+// A ticket arrives late on Wednesday before a Thursday holiday. Thursday is a
+// working day of the week and counts for nothing; Friday morning does.
+func TestAHolidayCountsForNothingThoughItsWeekdayIsWorked(t *testing.T) {
+	hours := &model.BusinessHours{
+		TZID: "America/Los_Angeles", Days: []string{"MO", "TU", "WE", "TH", "FR"}, Start: "09:00", End: "17:00",
+		Holidays: []string{"2026-11-26"},
+	}
+	if err := hours.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	loc, _ := time.LoadLocation(hours.TZID)
+	wednesdayEvening := time.Date(2026, 11, 25, 16, 0, 0, 0, loc) // one working hour left
+	fridayMorning := time.Date(2026, 11, 27, 10, 0, 0, 0, loc)    // one hour into Friday
+
+	if got, want := BusinessSecondsBetween(wednesdayEvening, fridayMorning, hours), 2*3600.0; got != want {
+		t.Errorf("business seconds across the holiday = %v, want %v (Thursday's eight hours must not count)", got, want)
+	}
+	withoutTheHoliday := *hours
+	withoutTheHoliday.Holidays = nil
+	if got, want := BusinessSecondsBetween(wednesdayEvening, fridayMorning, &withoutTheHoliday), 10*3600.0; got != want {
+		t.Errorf("the same range with no holiday = %v, want %v", got, want)
+	}
+
+	// The holiday is a date in the board's zone. 07:00 UTC on the 27th is still
+	// 23:00 on the 26th in Los Angeles: a range read in UTC must not end it early.
+	endOfHolidayInUTC := time.Date(2026, 11, 27, 7, 0, 0, 0, time.UTC)
+	startOfHolidayInUTC := time.Date(2026, 11, 26, 8, 0, 0, 0, time.UTC) // 00:00 in Los Angeles
+	if got := BusinessSecondsBetween(startOfHolidayInUTC, endOfHolidayInUTC, hours); got != 0 {
+		t.Errorf("business seconds inside the holiday = %v, want 0", got)
+	}
+}
+
+func TestHolidaysThatCannotBeReadAreRefused(t *testing.T) {
+	week := model.BusinessHours{TZID: "America/Los_Angeles", Days: []string{"MO"}, Start: "09:00", End: "17:00"}
+	for what, holidays := range map[string][]string{
+		"not a date":         {"Thanksgiving"},
+		"a date with a time": {"2026-11-26T00:00:00Z"},
+		"an unpadded date":   {"2026-1-5"},
+		"a day that is not":  {"2026-02-30"},
+		"the same day twice": {"2026-12-25", "2026-12-25"},
+	} {
+		hours := week
+		hours.Holidays = holidays
+		if err := hours.Validate(); err == nil {
+			t.Errorf("%s (%v) was accepted", what, holidays)
+		}
+	}
+}

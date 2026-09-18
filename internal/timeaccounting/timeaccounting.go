@@ -183,13 +183,20 @@ func BusinessSecondsBetween(from, to time.Time, hours *model.BusinessHours) floa
 	if len(days) == 0 {
 		return 0
 	}
+	holidays := hours.HolidaySet()
 
 	total := 0.0
 	localFrom := from.In(loc)
 	cursor := time.Date(localFrom.Year(), localFrom.Month(), localFrom.Day(), 0, 0, 0, 0, loc)
 	for cursor.Before(to) {
 		next := cursor.AddDate(0, 0, 1)
-		if _, working := days[cursor.Weekday()]; working {
+		_, working := days[cursor.Weekday()]
+		// cursor is midnight in the board's zone, so its date is the date a
+		// holiday names.
+		if _, holiday := holidays[cursor.Format(model.HolidayDateLayout)]; holiday {
+			working = false
+		}
+		if working {
 			windowStart := cursor.Add(time.Duration(startMinutes) * time.Minute)
 			windowEnd := cursor.Add(time.Duration(endMinutes) * time.Minute)
 			lower := windowStart

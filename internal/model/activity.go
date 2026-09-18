@@ -338,6 +338,31 @@ type BusinessHours struct {
 	Days  []string `json:"days"`
 	Start string   `json:"start"`
 	End   string   `json:"end"`
+	// Holidays are dates, in the board's own zone, on which no business time
+	// counts however the week is drawn: "2026-12-25". Stored sorted.
+	//
+	// On a PATCH, absent and empty differ, as they do for the board's other
+	// fields: business_hours sent without holidays keeps the stored ones, so a
+	// client that edits only the working week cannot wipe them by not knowing
+	// they exist; `"holidays":[]` clears them. Clearing the business hours
+	// themselves clears these too, since a holiday is a date in their zone.
+	Holidays []string `json:"holidays,omitempty"`
+}
+
+// HolidayDateLayout is how a holiday is written: a calendar date with no time
+// and no zone, because the zone is the board's.
+const HolidayDateLayout = "2006-01-02"
+
+// MaxHolidays bounds the list. Twenty years of a generous calendar fits.
+const MaxHolidays = 500
+
+// HolidaySet is the holidays as a set of dates, for the day-by-day walk.
+func (b *BusinessHours) HolidaySet() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, holiday := range b.Holidays {
+		out[holiday] = struct{}{}
+	}
+	return out
 }
 
 var weekdayByCode = map[string]time.Weekday{
@@ -401,6 +426,22 @@ func (b *BusinessHours) Validate() error {
 	}
 	if end <= start {
 		return fmt.Errorf("end (%s) must be after start (%s); overnight business hours are not supported", b.End, b.Start)
+	}
+	if len(b.Holidays) > MaxHolidays {
+		return fmt.Errorf("holidays has %d dates; a board takes at most %d", len(b.Holidays), MaxHolidays)
+	}
+	seen := map[string]struct{}{}
+	for _, holiday := range b.Holidays {
+		parsed, err := time.Parse(HolidayDateLayout, holiday)
+		// Parse accepts "2026-1-5"; only the canonical form is stored, because
+		// the day walk compares strings.
+		if err != nil || parsed.Format(HolidayDateLayout) != holiday {
+			return fmt.Errorf("holiday %q must be a date written YYYY-MM-DD, in the board's zone", boundedtext.Value(holiday))
+		}
+		if _, twice := seen[holiday]; twice {
+			return fmt.Errorf("holiday %s is listed twice", holiday)
+		}
+		seen[holiday] = struct{}{}
 	}
 	return nil
 }

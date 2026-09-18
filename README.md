@@ -449,6 +449,19 @@ rules demand one: an offset is not a zone, and hours anchored to one drift an ho
 twice a year. A board without hours reports no business figures at all rather than
 a guessed nine-to-five. Send `{"business_hours":{}}` to clear them.
 
+**Holidays** are dates on which no business time counts, however the week is
+drawn: `"holidays":["2026-11-26","2026-12-25"]` inside `business_hours`. A date
+is written `YYYY-MM-DD` and read in the board's own zone, so a holiday starts and
+ends at that zone's midnight; anything else, or a date listed twice, is a **400**.
+They are stored sorted, at most 500.
+
+⚠️ **Absent and empty differ.** `business_hours` sent *without* `holidays` keeps
+the stored ones; `"holidays":[]` clears them. The object is otherwise replaced
+whole, and a client that edits only the working week — bridge-ui's settings form
+is one — would wipe every holiday on its first save if leaving the field out
+meant "none". Clearing the business hours clears the holidays too: they are
+dates in its zone.
+
 ### Board settings
 
 A board carries the defaults a dispatcher or classifier used to take as flags
