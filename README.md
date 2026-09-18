@@ -148,6 +148,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 
 | Method | Path | Notes |
 |---|---|---|
+| `GET` | `/api/boards/{id}/access` | What the caller of this request may do on the board: `{"principal_id":…,"unrestricted":…,"relations":["can_view","can_edit"]}`. `relations` is every relation that holds, weakest first, with the inclusion rule already applied — ask whether the one you need is in it. Needs `can_view`; **404** otherwise |
 | `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column** |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
@@ -157,6 +158,7 @@ Card-scoped operations, across every board the card is on:
 
 | Method | Path | Notes |
 |---|---|---|
+| `GET` | `/api/cards/{id}` | One card read through the gate: `item`, the `placements` the caller can view, `links`, `assignments`, `ticket`, and `access` — what the caller may do to it. **404** for an id that is on no board, so this is not a way to read any noteboard item. noteboard checks no caller, so a client that must not see every item reads a card's body here |
 | `PATCH` | `/api/cards/{id}` | Forwarded to noteboard unchanged — edit title, body, tags, anything |
 | `DELETE` | `/api/cards/{id}` | Reversible; `?hard=true` purges the item and drops every placement |
 | `POST` | `/api/cards/{id}/move` | `{"board_id":…,"column_id":…,"position":…}` |
@@ -710,6 +712,12 @@ grant-store):
   changeable only with `can_edit` on **every** board the card sits on, because
   the content is one noteboard item shared by all of them. Attaching an existing
   item needs it to be a card the principal can already see.
+- **What may I do?** `GET /api/boards/{id}/access`, and `access` on
+  `GET /api/cards/{id}`, answer with the relations that hold for the caller, so
+  a client offers only the commands the store would accept. A card's answer
+  follows the rule above: a card that also sits on a board the caller cannot
+  view is `can_view` only, and that board is not named — not in `placements`,
+  and not in the ticket's `states`.
 - **Lists** (`/api/search`, `/api/assignments`, `/api/entities/*/cards`, a card's
   placements) are filtered to what the principal can see.
 - A board or card the principal cannot view is **404**, the same as one that does

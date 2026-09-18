@@ -252,8 +252,32 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 			a.boardMessageDeliveries(w, r, boardID)
 			return
 		}
+	case "access":
+		if len(parts) == 2 {
+			a.boardCallerAccess(w, r, boardID)
+			return
+		}
 	}
 	writeError(w, 404, "not found")
+}
+
+// boardCallerAccess answers what the caller of this request may do on a board,
+// so a client can offer only the commands the store would accept.
+func (a *API) boardCallerAccess(w http.ResponseWriter, r *http.Request, boardID string) {
+	if r.Method != "GET" {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	if _, err := a.store.GetBoard(boardID); err != nil {
+		mapDBErr(w, err)
+		return
+	}
+	access := principalBoardAccessFrom(r)
+	level := BoardAccessAdminister
+	if access != nil {
+		level = access.LevelOn(boardID)
+	}
+	writeJSON(w, 200, callerAccessAt(r, access, level))
 }
 
 func (a *API) boardByID(w http.ResponseWriter, r *http.Request, id string) {
@@ -761,6 +785,8 @@ func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, ho
 
 func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 	switch r.Method {
+	case "GET":
+		a.cardDetail(w, r, cardID)
 	case "PATCH":
 		// Forward arbitrary patch to noteboard so callers can edit title/body/tags/etc.
 		var patch map[string]any
@@ -827,6 +853,64 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 	default:
 		writeError(w, 405, "method not allowed")
 	}
+}
+
+// cardDetail reads one card through the gate: its noteboard item, the
+// placements the caller can see, its links, assignments and ticket, and what
+// the caller may do to it. noteboard itself checks no caller, so a client that
+// must not see every item reads a card's body here.
+func (a *API) cardDetail(w http.ResponseWriter, r *http.Request, cardID string) {
+	placements, err := a.store.ListPlacementsByCard(cardID)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if len(placements) == 0 {
+		// A noteboard item on no board is not a card, and answering it here
+		// would make this route a way to read any note by id.
+		writeError(w, 404, "not found")
+		return
+	}
+	access := principalBoardAccessFrom(r)
+	level := BoardAccessAdminister
+	if access != nil {
+		boardIDs := make([]string, 0, len(placements))
+		for _, placement := range placements {
+			boardIDs = append(boardIDs, placement.BoardID)
+		}
+		level = levelOnCard(access, boardIDs)
+	}
+	item, err := a.noteboard.GetItem(cardID)
+	if err != nil && !noteboard.IsNotFound(err) {
+		writeError(w, 502, err.Error())
+		return
+	}
+	detail := model.CardDetail{CardID: cardID, Placements: []*model.Placement{}, Access: callerAccessAt(r, access, level)}
+	if item != nil {
+		detail.Item = item
+	}
+	for _, placement := range placements {
+		if access == nil || access.LevelOn(placement.BoardID) >= BoardAccessView {
+			detail.Placements = append(detail.Placements, placement)
+		}
+	}
+	if detail.Links, err = a.store.ListCardLinks(cardID); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if detail.Assignments, err = a.store.ListCardAssignments(cardID); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	ticket, err := a.ticketView(cardID, access)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		writeError(w, 500, err.Error())
+		return
+	}
+	if err == nil {
+		detail.Ticket = ticket
+	}
+	writeJSON(w, 200, detail)
 }
 
 func (a *API) moveCard(w http.ResponseWriter, r *http.Request, cardID string) {

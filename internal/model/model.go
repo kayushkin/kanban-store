@@ -457,6 +457,43 @@ type CardView struct {
 	Time *CardTimeSummary `json:"time,omitempty"`
 }
 
+// CallerAccess is what the caller of this very request may do on one board or
+// one card, so a client can offer only the commands the store would accept
+// instead of learning each refusal by trying.
+//
+// Relations is every grant-store board relation that holds for the caller,
+// weakest first, with kanban-store's inclusion rule already applied: a caller
+// who may edit is listed as can_view and can_edit. A client asks whether the
+// relation it needs is in the list and never learns the ordering.
+type CallerAccess struct {
+	// PrincipalID is absent when an internal service sent the service token.
+	PrincipalID string `json:"principal_id,omitempty"`
+	// Unrestricted is true for the service token and for an administrator:
+	// every relation holds, whatever was granted.
+	Unrestricted bool     `json:"unrestricted"`
+	Relations    []string `json:"relations"`
+}
+
+// CardDetail is GET /api/cards/{id}: one card read through the gate. A card's
+// content lives in noteboard, which has no callers' rules of its own, so this
+// is the only read of a card's body that checks who is asking.
+type CardDetail struct {
+	CardID string `json:"card_id"`
+	// Item is the noteboard item, passed through unchanged; null when the item
+	// was deleted out from under its placements.
+	Item any `json:"item" tstype:"NoteboardItem | null"`
+	// Placements are the boards the caller can view, not every board the card
+	// sits on: a board the caller cannot see is not named to it.
+	Placements  []*Placement     `json:"placements"`
+	Links       []CardLink       `json:"links,omitempty"`
+	Assignments []CardAssignment `json:"assignments,omitempty"`
+	Ticket      *TicketView      `json:"ticket,omitempty"`
+	// Access is what the caller may do to this card. Editing needs can_edit on
+	// every board the card sits on, seen or not, so a card on a board the
+	// caller cannot view is can_view here however much it holds elsewhere.
+	Access CallerAccess `json:"access"`
+}
+
 // EntityCardView is one row of GET /api/entities/{type}/{ref}/cards: a card
 // that links the entity, with its noteboard item passed through unchanged.
 // Item is null when the item was hard-deleted out from under kanban-store, so

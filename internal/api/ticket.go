@@ -40,7 +40,7 @@ func (a *API) ticketLifecycleStates(w http.ResponseWriter, r *http.Request) {
 func (a *API) cardTicket(w http.ResponseWriter, r *http.Request, cardID string) {
 	switch r.Method {
 	case http.MethodGet:
-		view, err := a.ticketView(cardID)
+		view, err := a.ticketView(cardID, principalBoardAccessFrom(r))
 		if errors.Is(err, db.ErrNotFound) {
 			writeError(w, 404, "card "+cardID+" is not a ticket")
 			return
@@ -113,7 +113,7 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 		writeError(w, 500, err.Error())
 		return
 	}
-	view, err := a.ticketView(cardID)
+	view, err := a.ticketView(cardID, principalBoardAccessFrom(r))
 	if err != nil {
 		writeTicketError(w, err)
 		return
@@ -122,8 +122,11 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 }
 
 // ticketView assembles the row, the requester's display name and one lifecycle
-// per board the card sits on.
-func (a *API) ticketView(cardID string) (*model.TicketView, error) {
+// per board the card sits on that the caller can view. A nil access is an
+// unrestricted caller and sees every board. A state names its board and its
+// column, so one on a board the caller cannot view would tell it the card sits
+// there and what that board calls its columns.
+func (a *API) ticketView(cardID string, access *PrincipalBoardAccess) (*model.TicketView, error) {
 	ticket, err := a.store.GetTicket(cardID)
 	if err != nil {
 		return nil, err
@@ -131,6 +134,15 @@ func (a *API) ticketView(cardID string) (*model.TicketView, error) {
 	states, err := a.store.TicketPlacementStates(cardID)
 	if err != nil {
 		return nil, err
+	}
+	if access != nil {
+		visible := states[:0]
+		for _, state := range states {
+			if access.LevelOn(state.BoardID) >= BoardAccessView {
+				visible = append(visible, state)
+			}
+		}
+		states = visible
 	}
 	view := &model.TicketView{Ticket: ticket, States: states}
 	// The name is for rendering only, and a principal-store that cannot answer

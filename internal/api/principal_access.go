@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/grantstore"
+	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
 )
 
@@ -112,6 +114,59 @@ func (access *PrincipalBoardAccess) ViewableBoardIDs() map[string]bool {
 		}
 	}
 	return viewable
+}
+
+// relationsHeldAt is every board relation that holds at a level, weakest first:
+// the inclusion rule, applied once here so that no client re-implements it.
+func relationsHeldAt(level BoardAccessLevel) []string {
+	relations := []string{}
+	for relation, levelOfRelation := range boardAccessLevelOfRelation {
+		if levelOfRelation <= level {
+			relations = append(relations, relation)
+		}
+	}
+	sort.Slice(relations, func(i, j int) bool {
+		return boardAccessLevelOfRelation[relations[i]] < boardAccessLevelOfRelation[relations[j]]
+	})
+	return relations
+}
+
+// callerAccessAt is the wire answer for a request whose caller holds level.
+// A nil access is the service token or an administrator, for whom level is
+// not consulted.
+func callerAccessAt(r *http.Request, access *PrincipalBoardAccess, level BoardAccessLevel) model.CallerAccess {
+	if access == nil {
+		return model.CallerAccess{
+			PrincipalID:  r.Header.Get(PrincipalIDHeader),
+			Unrestricted: true,
+			Relations:    relationsHeldAt(BoardAccessAdminister),
+		}
+	}
+	return model.CallerAccess{PrincipalID: access.PrincipalID, Relations: relationsHeldAt(level)}
+}
+
+// levelOnCard is what a principal may do to a card, by the same rule
+// requireOnCard refuses with: viewing needs view on any board the card sits
+// on, and anything more needs it on every one of them.
+func levelOnCard(access *PrincipalBoardAccess, boardIDsOfCard []string) BoardAccessLevel {
+	seen := false
+	lowest := BoardAccessAdminister
+	for _, boardID := range boardIDsOfCard {
+		level := access.LevelOn(boardID)
+		if level >= BoardAccessView {
+			seen = true
+		}
+		if level < lowest {
+			lowest = level
+		}
+	}
+	if !seen {
+		return BoardAccessNone
+	}
+	if lowest < BoardAccessView {
+		return BoardAccessView
+	}
+	return lowest
 }
 
 type principalBoardAccessContextKey struct{}
@@ -245,22 +300,12 @@ func (a *API) requireOnCard(access *PrincipalBoardAccess, cardID string, needed 
 	if err != nil {
 		return nil, err
 	}
-	seen := false
-	for _, boardID := range boardIDs {
-		if access.LevelOn(boardID) >= BoardAccessView {
-			seen = true
-		}
-	}
-	if !seen {
+	level := levelOnCard(access, boardIDs)
+	if level < BoardAccessView {
 		return refuseUnseen, nil
 	}
-	if needed == BoardAccessView {
-		return nil, nil
-	}
-	for _, boardID := range boardIDs {
-		if access.LevelOn(boardID) < needed {
-			return refuseBelow(needed, what+" (on every board the card sits on)"), nil
-		}
+	if level < needed {
+		return refuseBelow(needed, what+" (on every board the card sits on)"), nil
 	}
 	return nil, nil
 }
@@ -308,6 +353,11 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 				return a.requireOnCard(access, parts[2], BoardAccessView, "attaching a card")
 			}
 		case parts[1] == "columns", parts[1] == "priority-levels", parts[1] == "tag-rules", parts[1] == "effective-defaults":
+			if reading {
+				needed = BoardAccessView
+			}
+		case parts[1] == "access":
+			// What the caller itself may do here. It names nobody else's grants.
 			if reading {
 				needed = BoardAccessView
 			}
