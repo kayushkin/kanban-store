@@ -216,6 +216,7 @@ they were sent in.
 
 | Method | Path | Notes |
 |---|---|---|
+| `GET` `POST` | `/api/cards/{id}/time-entries` | Time people log by hand, as `time_logged` events; a correction names the entry it replaces — see [Time people log by hand](#time-people-log-by-hand) |
 | `GET` `POST` | `/api/cards/{id}/events` | The action log. `POST {"kind":…,"clock_state":…,"occurred_at":…,"actor":…,"summary":…}` |
 | `GET` `POST` | `/api/cards/{id}/notes` | Status updates and summaries written onto the card. Each carries `visibility` — see [Who a note is for](#who-a-note-is-for); `GET ?visibility=requester` keeps only those |
 | `GET` | `/api/note-visibilities` | The vocabulary: `["internal","requester"]` |
@@ -232,6 +233,50 @@ linking idempotent.
 
 The reverse lookup returns parallel `card_id`/`item` pairs so a caller can spot
 orphans — a `null` item means the noteboard item is gone but the link is not.
+
+### Time people log by hand
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/cards/{id}/time-entries` | `{"card_id":…,"active_seconds":…,"entries":[…]}`, oldest first. `?active=true` leaves out the replaced ones; `active_seconds` is the card's total either way |
+| `POST` | `/api/cards/{id}/time-entries` | `{"seconds":2700,"summary":…,"worked_at":…,"worker_principal_id":…,"board_id":…,"supersedes_event_id":…}` → **201** and the entry |
+
+**A time entry is an event.** It is a `time_logged` event on the card's
+timeline, beside the moves and the notes, with `detail`
+`{"seconds":…,"worker_principal_id":…,"worked_at":…}`. `worker_principal_id` is
+who did the work — a principal-store **human**, checked on write as an assignee
+is (400 unknown, disabled, or a group or contact; 502 when principal-store
+cannot answer; nothing written). It defaults to the calling principal, and a
+caller that is not one must name it. The event's `actor` is who logged it, which
+is not always the same person.
+
+**A correction is a new entry that names the one it replaces**
+(`supersedes_event_id`). The log stays append-only: the old entry is never
+touched, stays on the timeline exactly as it was logged, and is inactive
+*because* the new one points at it — `superseded_by_event_id` on the entry and on
+its timeline row is computed from that pointer, not stored. Follow the pointers
+either way to read an entry's history. Only active entries count, in
+`active_seconds` here and in `logged_seconds` on the card's time summary (board
+view, column page and timeline). **Withdrawing** an entry is a correction to
+`"seconds":0`, which is the one place zero is allowed.
+
+An entry can be replaced **once** — a unique index, so it is a rule of the
+database and not of the code that writes. Two corrections of the same entry made
+at once cannot both land: one is **201**, the other **409** naming the entry
+that won, which is the one to correct instead. A correction takes the board of
+the entry it replaces.
+
+**It moves no clock.** Saying how long something took says nothing about whether
+the work is runnable, so the event carries the clock state the card was already
+in, as an assignment does; logging time on a card that is waiting on its
+requester leaves it waiting. And the event happens **when it is logged**: the
+clock is the walk of the events in order, and an entry backdated to yesterday
+would split an interval already accounted for. When the work was done is
+`worked_at`, which may be in the past and not in the future.
+
+`seconds` is at most 31 days, which is there to catch milliseconds sent as
+seconds. `POST …/events` refuses `kind: time_logged` and names this route, so
+the generic route is not a way around these rules.
 
 ### Who a note is for
 

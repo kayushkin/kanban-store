@@ -747,6 +747,11 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 	case "ticket":
 		a.cardTicket(w, r, cardID)
 		return
+	case "time-entries":
+		if len(parts) == 2 {
+			a.cardTimeEntries(w, r, cardID)
+			return
+		}
 	case "assignments":
 		if len(parts) == 2 {
 			a.cardAssignments(w, r, cardID)

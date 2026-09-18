@@ -9,6 +9,7 @@
 package timeaccounting
 
 import (
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -50,6 +51,18 @@ func Compute(in Input) (*model.CardTimeSummary, []model.TimelineEntry) {
 	})
 
 	s := &model.CardTimeSummary{AsOf: now, EventCount: len(events)}
+	supersededBy := model.SupersededByEventID(events)
+	for _, e := range events {
+		if e.Kind != model.EventTimeLogged || supersededBy[e.ID] != "" {
+			continue
+		}
+		var detail model.TimeLoggedEventDetail
+		// Only kanban-store's time-entries route writes this kind. A detail that
+		// does not parse contributes nothing; the time-entries read reports it.
+		if err := json.Unmarshal(e.Detail, &detail); err == nil {
+			s.LoggedSeconds += detail.Seconds
+		}
+	}
 	if in.Level != nil {
 		value := in.Level.PriorityValue
 		s.PriorityValue = &value
@@ -130,6 +143,7 @@ func Compute(in Input) (*model.CardTimeSummary, []model.TimelineEntry) {
 		}
 		entry := model.TimelineEntry{
 			Event:                     e,
+			SupersededByEventID:       supersededBy[e.ID],
 			SecondsSincePreviousEvent: sincePrevious,
 			SegmentSeconds:            seconds,
 			SegmentOpen:               seg.Open,

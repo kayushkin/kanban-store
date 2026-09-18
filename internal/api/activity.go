@@ -156,6 +156,12 @@ func (a *API) cardEvents(w http.ResponseWriter, r *http.Request, cardID string) 
 			writeError(w, 400, err.Error())
 			return
 		}
+		if req.Kind == model.EventTimeLogged {
+			// An entry may replace another, and that has rules this route does
+			// not check.
+			writeError(w, 400, "a time_logged event is written through POST /api/cards/{id}/time-entries, which checks who worked and which entry it replaces")
+			return
+		}
 		state, _ := req.ResolveClockState()
 		actor := req.Actor
 		if actor == "" {

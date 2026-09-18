@@ -128,19 +128,24 @@ func DefaultClockStateForEventKind(k EventKind) (ClockState, bool) {
 // arriving concerns the card wherever it sits. A card's timeline on a board is
 // its board-specific events merged with its card-wide ones.
 type CardEvent struct {
-	ID           string          `json:"id"`
-	CardID       string          `json:"card_id"`
-	BoardID      string          `json:"board_id,omitempty"`
-	Kind         EventKind       `json:"kind"`
-	ClockState   ClockState      `json:"clock_state"`
-	Actor        string          `json:"actor,omitempty"`
-	Summary      string          `json:"summary,omitempty"`
-	FromColumnID string          `json:"from_column_id,omitempty"`
-	ToColumnID   string          `json:"to_column_id,omitempty"`
-	NoteID       string          `json:"note_id,omitempty"`
-	Detail       json.RawMessage `json:"detail,omitempty"`
-	OccurredAt   time.Time       `json:"occurred_at"`
-	RecordedAt   time.Time       `json:"recorded_at"`
+	ID           string     `json:"id"`
+	CardID       string     `json:"card_id"`
+	BoardID      string     `json:"board_id,omitempty"`
+	Kind         EventKind  `json:"kind"`
+	ClockState   ClockState `json:"clock_state"`
+	Actor        string     `json:"actor,omitempty"`
+	Summary      string     `json:"summary,omitempty"`
+	FromColumnID string     `json:"from_column_id,omitempty"`
+	ToColumnID   string     `json:"to_column_id,omitempty"`
+	NoteID       string     `json:"note_id,omitempty"`
+	// SupersedesEventID names an earlier event this one replaces. The log stays
+	// append-only: the earlier event is never touched, and is read as inactive
+	// because this one points at it. At most one event may supersede another.
+	// Used by time_logged; see EventTimeLogged.
+	SupersedesEventID string          `json:"supersedes_event_id,omitempty"`
+	Detail            json.RawMessage `json:"detail,omitempty"`
+	OccurredAt        time.Time       `json:"occurred_at"`
+	RecordedAt        time.Time       `json:"recorded_at"`
 }
 
 // CreateCardEventRequest records an action from outside kanban-store — an email

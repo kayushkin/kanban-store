@@ -50,6 +50,11 @@ func New(baseURL string) *Client {
 // vocabulary itself is principal-store's, served at GET /kinds.
 const KindContact = "contact"
 
+// KindHuman is principal-store's kind for a person of this deployment. Spelled
+// here because a time entry names who did the work, and a group or an outside
+// contact does not work hours.
+const KindHuman = "human"
+
 type Principal struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`

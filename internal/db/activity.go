@@ -61,6 +61,16 @@ func migrateActivity(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "card_events", "supersedes_event_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// One successor per event, as a rule of the database and not of the code
+	// that writes: two corrections of the same entry made at once cannot both
+	// land, so an entry's history is a line and never a fork.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_card_events_supersedes
+		ON card_events(supersedes_event_id) WHERE supersedes_event_id != ''`); err != nil {
+		return err
+	}
 	// Every note written before visibility existed was written for the people
 	// working the card, so the column's default is the right value for them.
 	if err := addColumnIfMissing(db, "card_notes", "visibility", "TEXT NOT NULL DEFAULT 'internal'"); err != nil {
@@ -144,26 +154,59 @@ func (s *Store) RecordCardEvent(e *model.CardEvent) (*model.CardEvent, error) {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO card_events
-		   (id, card_id, board_id, kind, clock_state, actor, summary, from_column_id, to_column_id, note_id, detail, occurred_at, recorded_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (id, card_id, board_id, kind, clock_state, actor, summary, from_column_id, to_column_id, note_id, supersedes_event_id, detail, occurred_at, recorded_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		stored.ID, stored.CardID, stored.BoardID, string(stored.Kind), string(stored.ClockState),
 		stored.Actor, stored.Summary, stored.FromColumnID, stored.ToColumnID, stored.NoteID,
-		detail, stored.OccurredAt, stored.RecordedAt,
+		stored.SupersedesEventID, detail, stored.OccurredAt, stored.RecordedAt,
 	)
 	if err != nil {
+		// The only unique rule on this table besides the primary key is "one
+		// successor per event", and the id above is freshly minted.
+		if stored.SupersedesEventID != "" && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil, ErrEventAlreadySuperseded
+		}
 		return nil, err
 	}
 	return &stored, nil
 }
 
+// ErrEventAlreadySuperseded refuses a second successor for one event.
+var ErrEventAlreadySuperseded = errors.New("that event has already been superseded")
+
+// GetCardEvent reads one event by id.
+func (s *Store) GetCardEvent(eventID string) (*model.CardEvent, error) {
+	e, err := scanCardEvent(s.db.QueryRow(`SELECT `+cardEventColumns+` FROM card_events WHERE id = ?`, eventID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+// SupersederOfCardEvent is the event that replaced eventID, or ErrNotFound when
+// nothing has.
+func (s *Store) SupersederOfCardEvent(eventID string) (*model.CardEvent, error) {
+	e, err := scanCardEvent(s.db.QueryRow(`SELECT `+cardEventColumns+` FROM card_events WHERE supersedes_event_id = ?`, eventID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
 const cardEventColumns = `id, card_id, board_id, kind, clock_state, actor, summary,
-	from_column_id, to_column_id, note_id, detail, occurred_at, recorded_at`
+	from_column_id, to_column_id, note_id, supersedes_event_id, detail, occurred_at, recorded_at`
 
 func scanCardEvent(r scanner) (model.CardEvent, error) {
 	var e model.CardEvent
 	var kind, state, detail string
 	if err := r.Scan(&e.ID, &e.CardID, &e.BoardID, &kind, &state, &e.Actor, &e.Summary,
-		&e.FromColumnID, &e.ToColumnID, &e.NoteID, &detail, &e.OccurredAt, &e.RecordedAt); err != nil {
+		&e.FromColumnID, &e.ToColumnID, &e.NoteID, &e.SupersedesEventID, &detail, &e.OccurredAt, &e.RecordedAt); err != nil {
 		return e, err
 	}
 	e.Kind = model.EventKind(kind)

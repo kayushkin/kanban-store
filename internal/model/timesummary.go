@@ -30,6 +30,10 @@ type TimelineEntry struct {
 	SegmentOpen               bool       `json:"segment_open"`
 	CountsAgainstBudget       bool       `json:"counts_against_budget"`
 	ClockState                ClockState `json:"clock_state"`
+	// SupersededByEventID is set on an event another one has replaced — a time
+	// entry that was corrected. It stays on the timeline as it was logged, and
+	// this is what says it no longer counts.
+	SupersededByEventID string `json:"superseded_by_event_id,omitempty"`
 }
 
 // CardTimeSummary is the card's time, answered three ways.
@@ -51,6 +55,12 @@ type CardTimeSummary struct {
 	BudgetClockSeconds float64 `json:"budget_clock_seconds"`
 	// WaitingSeconds is the rest: time the ball was with someone else. Your 24.
 	WaitingSeconds float64 `json:"waiting_seconds"`
+	// LoggedSeconds is the time people have recorded by hand on the card: the
+	// sum of its active time entries. It is a different thing from the three
+	// figures above, which are read off the clock — those say how long the card
+	// took, this says how much work somebody says they did. An entry that has
+	// been replaced does not count; its replacement does.
+	LoggedSeconds int64 `json:"logged_seconds"`
 
 	// BusinessHoursElapsedSeconds and BusinessHoursBudgetClockSeconds repeat the
 	// two figures above counting only the board's working week. Both are absent
