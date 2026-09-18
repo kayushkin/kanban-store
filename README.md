@@ -76,14 +76,20 @@ Create a board first, or drop that check.
 
 ## Security
 
-**There is no authentication and no authorization.** Every endpoint is open to
-anyone who can reach the port, and `Access-Control-Allow-Origin` is `*`
-(`internal/api/api.go:57`). The server binds every interface, not loopback
-(`cmd/kanban-store/main.go:43`).
+**Every request except `/health` and `OPTIONS` must carry credentials**: the
+service token (`X-Kanban-Store-Service-Token`, internal services) or
+`X-Principal-Id`. Anything else is a 401. The rules are in
+[Who may see which board](#who-may-see-which-board).
 
-That is a deliberate fit for one trusted host behind a firewall, and it is
-**unsafe to expose to a network you do not control**. Put it behind a reverse
-proxy that authenticates, or bind it to loopback, before it can be routed to.
+The principal id is trusted as sent. So the store must be reached only through a
+gateway that strips any `X-Principal-Id` or service token a client sent and sets
+its own from a verified identity; llm-bridge-server's `/kanban/` proxy does. The
+server still binds every interface, not loopback (`cmd/kanban-store/main.go`),
+and `Access-Control-Allow-Origin` is `*`, so **do not expose the port**: a caller
+who can reach it directly can claim to be anyone.
+
+Until 2026-09-18 this section said "there is no authentication and no
+authorization". That was true before the access gate and false after it.
 
 ## HTTP API
 
