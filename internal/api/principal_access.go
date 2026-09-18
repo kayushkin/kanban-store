@@ -428,6 +428,11 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 
 	case path == "/api/assignments", path == "/api/search":
 		return nil, nil // filtered by the handler
+
+	case path == "/api/bulk-card-commands":
+		// Names no card of its own. Each card in the request is judged by the
+		// single-card rule above, as this caller, before anything is done to it.
+		return nil, nil
 	}
 	return &accessRefusal{status: http.StatusForbidden, message: "no access rule for " + r.Method + " " + path + " under principal enforcement"}, nil
 }

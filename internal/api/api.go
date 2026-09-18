@@ -45,6 +45,13 @@ func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Clien
 }
 
 func (a *API) Handler() http.Handler {
+	return cors(a.principalGate(a.routes()))
+}
+
+// routes is every route with no gate in front of it. Handler puts the gate
+// there; the bulk card route runs single-card requests through these same
+// handlers after applying the gate's rules to each one itself.
+func (a *API) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", a.health)
 
@@ -85,7 +92,10 @@ func (a *API) Handler() http.Handler {
 	// search delegate
 	mux.HandleFunc("/api/search", a.search)
 
-	return cors(a.principalGate(mux))
+	// one command applied to many cards, each through its single-card route
+	mux.HandleFunc("/api/bulk-card-commands", a.bulkCardCommands)
+
+	return mux
 }
 
 func cors(h http.Handler) http.Handler {

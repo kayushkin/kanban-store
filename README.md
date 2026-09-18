@@ -177,6 +177,41 @@ Held-ness is inherited down noteboard's `parent_id`, and so is the
 `auto_hold_at_usd` spend ceiling passed through on create. A sub-card created
 without `parent_id` escapes both.
 
+### One command, many cards
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/bulk-card-commands` | The vocabulary: `{"commands":["move","assign","unassign","hold","unhold","add_tags","remove_tags"],"max_cards":200}` |
+| `POST` | `/api/bulk-card-commands` | `{"card_ids":[…],"command":…}` plus the one field the command reads: `move` (`{"board_id":…,"column_id":…,"position":…}`), `principal_id` (assign, unassign), `reason` (hold), `tags` (add_tags, remove_tags) |
+
+```json
+{"command":"move","succeeded":1,"failed":2,"results":[
+  {"card_id":"…","status":200,"response":{"placement":{…}}},
+  {"card_id":"…","status":404,"response":{"error":"not found"}},
+  {"card_id":"…","status":409,"response":{"error":"column … is at its WIP limit"}}]}
+```
+
+**It re-implements no rule.** For each card it builds the request the
+single-card route takes and runs it through the same access rules and the same
+handler, as the same caller. So a bulk move obeys the WIP limit, applies the
+column's `auto_status`, writes its own `card_moved` event naming the caller, and
+fires the board's message triggers, card by card; and each `status` and
+`response` is that route's own answer, unchanged.
+
+**It is not one transaction.** Each card is its own command, exactly as if sent
+alone. A card that is refused undoes nothing done to the others; the answer
+says which is which, and the request itself is **200** whenever it was well
+formed. A request that is wrong as a whole — no cards, more than `max_cards`, a
+card named twice, an unknown command, a field its command does not read — is a
+**400** and touches nothing.
+
+`add_tags` and `remove_tags` exist because noteboard's `PATCH` replaces the whole
+tag list. They read the card, change only the tags named, and save against the
+version they read (`If-Match`), so a card someone else saved in between answers
+**412** for that card and keeps their tags. A bulk move puts the first card at
+`position` and each one after it one further on, so the cards keep the order
+they were sent in.
+
 ### Card links
 
 | Method | Path | Notes |
