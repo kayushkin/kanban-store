@@ -1,12 +1,14 @@
-These sections are stored in agent-store as a project prompt collection and rendered, with identical text, to `AGENTS.md` and `CLAUDE.md` at the root of this repo, so that whichever file a harness reads it gets the same thing. Edit them on dash `/files`, or edit either rendered file: the 15-minute scan carries the edit back into the sections and out to the other file. The host prompt keeps one row for this repo with only what an agent elsewhere needs.
+# About kanban-store
 
-# kanban-store
+## What it owns
 
 `:8305`. Board and card *placement*, treating **noteboard as the source of truth for card content** — it stores where a card sits, not what it says. Publishes an entity-type registry so agents can resolve entity refs themselves; deliberately dumb, it does not proxy to those services. README is the route table.
 
-## Who may call it
+## Where this prompt lives
 
-Every request except `/health` and `OPTIONS` must carry either the service token (`X-Kanban-Store-Service-Token`, internal services only, unrestricted) or `X-Principal-Id`; anything else is **401** (measured 2026-09-18). The principal id is trusted as sent, so callers must reach the store only through a gateway that sets it from a verified identity: llm-bridge-server's `/kanban/` proxy does this for a logged-in user and for an agent session that sends `Authorization: Bearer $LLM_BRIDGE_PRINCIPAL_TOKEN` to `$LLM_BRIDGE_GATEWAY_URL/kanban/…`. Access is per board, from grant-store's `can_view`, `can_edit` and `can_administer` (each includes the one before); an administrator in principal-store is unrestricted. A board or card the principal cannot view is **404**, not 403. A principal-store or grant-store that cannot answer is a 502. README "Who may see which board" has the full rules. ⚠️ README "Security" said "there is no authentication" until 2026-09-18; that was true before the gate and false after it.
+These sections are stored in agent-store as a project prompt collection and rendered, with identical text, to `AGENTS.md` and `CLAUDE.md` at the root of this repo, so that whichever file a harness reads it gets the same thing. Edit them on dash `/files`, or edit either rendered file: the 15-minute scan carries the edit back into the sections and out to the other file. The host prompt keeps one row for this repo with only what an agent elsewhere needs.
+
+# How it works
 
 ## A board owns what its jobs run with
 
@@ -21,6 +23,14 @@ Tag rules override a board's defaults per card: `PUT /api/boards/{id}/tag-rules`
 A board carries message triggers: `event_kind` (served by `GET /api/message-trigger-options` — `card_created`, `card_moved`, `card_completed`, `assigned`, `card_held`), an optional `to_column_id` (moves into that column only), an optional `priority_value` (a rung of the board's ladder, by value), a multichat puppet id as recipient, and a Go template — sent through multichat's `POST /api/messages/send`. Edited in the **Message triggers** section of bridge-ui's `kanban/settings` page (`bridge-ui/src/components/BoardMessageTriggersSection.tsx`). A card write never waits on it; each firing writes one `message_deliveries` row, unique on `(trigger_id, event_id)`, with status `sent`, `failed`, `pending` or `not_configured`.
 
 ⚠️ **Delivery is off on purpose**: the unit has no `MULTICHAT_URL`, so every firing is recorded `not_configured` with the message it would have sent. To turn it on, put `Environment=MULTICHAT_URL=http://localhost:8402`, `Environment=AUTH_STORE_URL=http://127.0.0.1:8303` and `Environment=AUTH_STORE_TOKEN=…` in a **host-local drop-in**, `~/.config/systemd/user/kanban-store.service.d/multichat.conf` (mode 600) — the same shape as the scheduler's `multichat-send.conf` — then `daemon-reload` and restart. ⚠️ **Not in `systemd/kanban-store.service`**: that template is tracked in the repo, so a token written there gets committed. multichat's token itself is resolved from auth-store provider `multichat` on each send; `MULTICHAT_URL` without `AUTH_STORE_TOKEN` refuses to start. README "Message triggers" is the route table.
+
+# Access and operations
+
+## Who may call it
+
+Every request except `/health` and `OPTIONS` must carry either the service token (`X-Kanban-Store-Service-Token`, internal services only, unrestricted) or `X-Principal-Id`; anything else is **401** (measured 2026-09-18). The principal id is trusted as sent, so callers must reach the store only through a gateway that sets it from a verified identity: llm-bridge-server's `/kanban/` proxy does this for a logged-in user and for an agent session that sends `Authorization: Bearer $LLM_BRIDGE_PRINCIPAL_TOKEN` to `$LLM_BRIDGE_GATEWAY_URL/kanban/…`. Access is per board, from grant-store's `can_view`, `can_edit` and `can_administer` (each includes the one before); an administrator in principal-store is unrestricted. A board or card the principal cannot view is **404**, not 403. A principal-store or grant-store that cannot answer is a 502. README "Who may see which board" has the full rules. ⚠️ README "Security" said "there is no authentication" until 2026-09-18; that was true before the gate and false after it.
+
+# Working in this repo
 
 ## Generated TypeScript types
 
