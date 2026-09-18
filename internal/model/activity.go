@@ -199,13 +199,56 @@ func (r *CreateCardEventRequest) Validate() error {
 // adding one is an action on the timeline. The body still says what the work is;
 // the notes say what has happened to it.
 type CardNote struct {
-	ID        string    `json:"id"`
-	CardID    string    `json:"card_id"`
-	BoardID   string    `json:"board_id,omitempty"`
-	Kind      string    `json:"kind"`
-	Body      string    `json:"body"`
-	Actor     string    `json:"actor,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID      string `json:"id"`
+	CardID  string `json:"card_id"`
+	BoardID string `json:"board_id,omitempty"`
+	Kind    string `json:"kind"`
+	// Visibility says who the note is for: the people working the card, or the
+	// requester as well. See NoteVisibility.
+	Visibility NoteVisibility `json:"visibility"`
+	Body       string         `json:"body"`
+	Actor      string         `json:"actor,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+// NoteVisibility is who a note is written for. It is a fact about the note,
+// recorded when it is written, and this store shows every note to every caller
+// who can view the card: the people working a ticket need the internal ones
+// most. What it decides is what a requester-facing reader — a portal, a reply
+// sent by mail — may pass on, and that reader asks for `requester` notes only.
+type NoteVisibility string
+
+const (
+	// NoteVisibilityInternal is for the people working the card and nobody else.
+	NoteVisibilityInternal NoteVisibility = "internal"
+	// NoteVisibilityRequester may be shown to the person who asked.
+	NoteVisibilityRequester NoteVisibility = "requester"
+)
+
+// NoteVisibilities is the vocabulary, served by GET /api/note-visibilities.
+var NoteVisibilities = []NoteVisibility{NoteVisibilityInternal, NoteVisibilityRequester}
+
+// DefaultNoteVisibility is what a note written without one gets, and what every
+// note written before the field existed is. Internal, because the other
+// default would show a requester something by omission.
+const DefaultNoteVisibility = NoteVisibilityInternal
+
+// ValidNoteVisibility reports whether v is in the vocabulary.
+func ValidNoteVisibility(v NoteVisibility) bool {
+	for _, known := range NoteVisibilities {
+		if v == known {
+			return true
+		}
+	}
+	return false
+}
+
+// NoteAddedEventDetail is the detail of a note_added event. The event's summary
+// is the note's body, so the timeline carries a note's text; the visibility
+// rides beside it so a requester-facing reader of the timeline can drop the
+// internal ones without fetching each note.
+type NoteAddedEventDetail struct {
+	Visibility NoteVisibility `json:"visibility"`
 }
 
 type CreateCardNoteRequest struct {
@@ -215,6 +258,10 @@ type CreateCardNoteRequest struct {
 	// "summary" or "status". Empty stores "note".
 	Kind  string `json:"kind,omitempty"`
 	Actor string `json:"actor,omitempty"`
+	// Visibility is `internal` or `requester` (GET /api/note-visibilities).
+	// Empty stores `internal`: a note is never shown to a requester because
+	// its writer left a field out.
+	Visibility NoteVisibility `json:"visibility,omitempty"`
 	// ClockState lets a note move the clock, since some updates are exactly the
 	// moment the ball changes hands ("replied, waiting on them"). Empty leaves the
 	// clock where the note_added default puts it.
@@ -225,6 +272,9 @@ type CreateCardNoteRequest struct {
 func (r *CreateCardNoteRequest) Validate() error {
 	if strings.TrimSpace(r.Body) == "" {
 		return fmt.Errorf("body is required")
+	}
+	if r.Visibility != "" && !ValidNoteVisibility(r.Visibility) {
+		return fmt.Errorf("visibility %q is not one of %v (GET /api/note-visibilities)", boundedtext.Value(string(r.Visibility)), NoteVisibilities)
 	}
 	if r.ClockState != "" && !ValidClockState(r.ClockState) {
 		return fmt.Errorf("clock_state must be one of: %s", strings.Join(ClockStateNames(), ", "))

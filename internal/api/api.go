@@ -85,6 +85,9 @@ func (a *API) routes() *http.ServeMux {
 	mux.HandleFunc("/api/ticket-channels", a.ticketChannels)
 	mux.HandleFunc("/api/ticket-lifecycle-states", a.ticketLifecycleStates)
 
+	// note vocabulary: who a note may be written for
+	mux.HandleFunc("/api/note-visibilities", a.noteVisibilities)
+
 	// entity-type registry & cross-entity tag listing
 	mux.HandleFunc("/api/entity-types", a.entityTypes)
 	mux.HandleFunc("/api/tags", a.allTags)

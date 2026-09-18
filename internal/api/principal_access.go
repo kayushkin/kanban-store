@@ -320,7 +320,7 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 	}
 	switch {
 	case path == "/api/entity-types", path == "/api/message-trigger-options",
-		path == "/api/ticket-channels", path == "/api/ticket-lifecycle-states":
+		path == "/api/ticket-channels", path == "/api/ticket-lifecycle-states", path == "/api/note-visibilities":
 		// Vocabularies: what a channel or a lifecycle state may be. They name
 		// no board and hold no card content.
 		return nil, nil

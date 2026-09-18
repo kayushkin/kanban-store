@@ -179,10 +179,25 @@ func (a *API) cardEvents(w http.ResponseWriter, r *http.Request, cardID string) 
 
 // ============================ Card notes ============================
 
+func (a *API) noteVisibilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	writeJSON(w, 200, model.NoteVisibilities)
+}
+
 func (a *API) cardNotes(w http.ResponseWriter, r *http.Request, cardID string) {
 	switch r.Method {
 	case "GET":
-		notes, err := a.store.ListCardNotes(cardID, r.URL.Query().Get("board_id"))
+		visibility := model.NoteVisibility(r.URL.Query().Get("visibility"))
+		if visibility != "" && !model.ValidNoteVisibility(visibility) {
+			// A filter that was dropped would answer every note, internal ones
+			// included, to a reader that asked for the requester's.
+			writeError(w, 400, fmt.Sprintf("visibility %q is not one of %v (GET /api/note-visibilities)", visibility, model.NoteVisibilities))
+			return
+		}
+		notes, err := a.store.ListCardNotes(cardID, r.URL.Query().Get("board_id"), visibility)
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
@@ -216,9 +231,16 @@ func (a *API) cardNotes(w http.ResponseWriter, r *http.Request, cardID string) {
 		if req.ClockState != "" {
 			state = req.ClockState
 		}
+		// The summary is the note's text, so the event says who that text is for.
+		detail, err := json.Marshal(model.NoteAddedEventDetail{Visibility: note.Visibility})
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
 		if err := a.recordEventAndFireMessageTriggers(&model.CardEvent{
 			CardID: cardID, BoardID: req.BoardID, Kind: model.EventNoteAdded, ClockState: state,
 			Actor: req.Actor, Summary: note.Body, NoteID: note.ID, OccurredAt: note.CreatedAt,
+			Detail: detail,
 		}); err != nil {
 			writeError(w, 500, err.Error())
 			return
@@ -272,7 +294,7 @@ func (a *API) cardTimeline(w http.ResponseWriter, r *http.Request, cardID string
 		writeError(w, 500, err.Error())
 		return
 	}
-	notes, err := a.store.ListCardNotes(cardID, boardID)
+	notes, err := a.store.ListCardNotes(cardID, boardID, "")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

@@ -217,7 +217,8 @@ they were sent in.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` `POST` | `/api/cards/{id}/events` | The action log. `POST {"kind":…,"clock_state":…,"occurred_at":…,"actor":…,"summary":…}` |
-| `GET` `POST` | `/api/cards/{id}/notes` | Status updates and summaries written onto the card |
+| `GET` `POST` | `/api/cards/{id}/notes` | Status updates and summaries written onto the card. Each carries `visibility` — see [Who a note is for](#who-a-note-is-for); `GET ?visibility=requester` keeps only those |
+| `GET` | `/api/note-visibilities` | The vocabulary: `["internal","requester"]` |
 | `GET` | `/api/cards/{id}/timeline` | `?board_id=` — every action in order, with the time between them and the totals |
 | `DELETE` | `/api/notes/{noteID}` | Removes the note's text; its `note_added` event stays |
 | `GET` `PUT` | `/api/boards/{id}/priority-levels` | The board's priority ladder |
@@ -231,6 +232,29 @@ linking idempotent.
 
 The reverse lookup returns parallel `card_id`/`item` pairs so a caller can spot
 orphans — a `null` item means the noteboard item is gone but the link is not.
+
+### Who a note is for
+
+A note carries `visibility`: `internal`, for the people working the card, or
+`requester`, which may also be shown to the person who asked. It is set when the
+note is written and never changed. **Left out, it is `internal`** — and so is
+every note written before the field existed — because the other default would
+show a requester something by omission. A value outside
+`GET /api/note-visibilities` is a **400**, on a write and on the `?visibility=`
+filter alike: a filter that was dropped would answer the internal notes to a
+reader that asked for the requester's.
+
+**This store does not hide internal notes from anyone who can view the card.**
+The people working a ticket need those most, and the requester is a
+principal-store contact who never calls this store. The field is for a
+requester-facing reader — a portal, a reply sent by mail — which asks for
+`?visibility=requester` and passes on nothing else.
+
+⚠️ **The timeline carries note text.** A `note_added` event's `summary` is the
+note's body, so the event's `detail` is `{"visibility":…}` and a timeline entry
+carries the joined note. A requester-facing reader of `/events` or `/timeline`
+must drop `note_added` events whose detail is not `requester` — and events
+written before 2026-09-18 have no detail, which means `internal`.
 
 ### Card assignments
 

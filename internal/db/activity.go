@@ -61,6 +61,11 @@ func migrateActivity(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	// Every note written before visibility existed was written for the people
+	// working the card, so the column's default is the right value for them.
+	if err := addColumnIfMissing(db, "card_notes", "visibility", "TEXT NOT NULL DEFAULT 'internal'"); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(db, "boards", "business_hours", "TEXT"); err != nil {
 		return err
 	}
@@ -239,12 +244,16 @@ func (s *Store) CreateCardNote(cardID string, req *model.CreateCardNoteRequest) 
 	if n.Kind == "" {
 		n.Kind = "note"
 	}
+	n.Visibility = req.Visibility
+	if n.Visibility == "" {
+		n.Visibility = model.DefaultNoteVisibility
+	}
 	if req.OccurredAt != nil {
 		n.CreatedAt = req.OccurredAt.UTC()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO card_notes (id, card_id, board_id, kind, body, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.CardID, n.BoardID, n.Kind, n.Body, n.Actor, n.CreatedAt,
+		`INSERT INTO card_notes (id, card_id, board_id, kind, visibility, body, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.CardID, n.BoardID, n.Kind, string(n.Visibility), n.Body, n.Actor, n.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -252,12 +261,18 @@ func (s *Store) CreateCardNote(cardID string, req *model.CreateCardNoteRequest) 
 	return n, nil
 }
 
-func (s *Store) ListCardNotes(cardID, boardID string) ([]model.CardNote, error) {
-	q := `SELECT id, card_id, board_id, kind, body, actor, created_at FROM card_notes WHERE card_id = ?`
+// ListCardNotes lists a card's notes, oldest first. An empty visibility keeps
+// every note; a visibility keeps only the notes written for it.
+func (s *Store) ListCardNotes(cardID, boardID string, visibility model.NoteVisibility) ([]model.CardNote, error) {
+	q := `SELECT id, card_id, board_id, kind, visibility, body, actor, created_at FROM card_notes WHERE card_id = ?`
 	args := []any{cardID}
 	if boardID != "" {
 		q += ` AND (board_id = ? OR board_id = '')`
 		args = append(args, boardID)
+	}
+	if visibility != "" {
+		q += ` AND visibility = ?`
+		args = append(args, string(visibility))
 	}
 	q += ` ORDER BY created_at ASC`
 	rows, err := s.db.Query(q, args...)
@@ -268,7 +283,7 @@ func (s *Store) ListCardNotes(cardID, boardID string) ([]model.CardNote, error) 
 	out := []model.CardNote{}
 	for rows.Next() {
 		var n model.CardNote
-		if err := rows.Scan(&n.ID, &n.CardID, &n.BoardID, &n.Kind, &n.Body, &n.Actor, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.CardID, &n.BoardID, &n.Kind, &n.Visibility, &n.Body, &n.Actor, &n.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
