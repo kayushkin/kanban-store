@@ -243,23 +243,35 @@ func (a *API) cardAttachmentContent(w http.ResponseWriter, r *http.Request, card
 	}
 }
 
-// purgeAttachmentsOfCard destroys every file on a card that is about to be
-// purged. It answers the status to refuse with when it cannot.
+// purgeAttachmentsOfCard destroys every file of a card that is about to be
+// purged, and answers the status to refuse with when it cannot.
+//
+// "Every file" is file-store's list for the card, deleted ones included, and
+// not this store's rows: a file taken off the card has no row here any more,
+// and file-store still holds it so the removal can be undone. Going by the rows
+// left those behind for good, owned by a card that no longer existed — found on
+// the first live run.
 func (a *API) purgeAttachmentsOfCard(cardID string) (int, error) {
 	attachments, err := a.store.ListCardAttachments(cardID, "")
 	if err != nil {
 		return 500, err
 	}
-	if len(attachments) == 0 {
+	if a.files == nil {
+		if len(attachments) > 0 {
+			return http.StatusServiceUnavailable, fmt.Errorf("card %s has %d attachments and no file-store is configured to destroy them, so the card is not purged", cardID, len(attachments))
+		}
 		return 0, nil
 	}
-	if a.files == nil {
-		return http.StatusServiceUnavailable, fmt.Errorf("card %s has %d attachments and no file-store is configured to destroy them, so the card is not purged", cardID, len(attachments))
+	files, err := a.files.EveryFileOfCard(cardID)
+	if err != nil {
+		return http.StatusBadGateway, fmt.Errorf("file-store could not list the files of card %s, so the card is not purged: %w", cardID, err)
+	}
+	for fileID := range files {
+		if err := a.files.Delete(fileID, true); err != nil && !errors.Is(err, filestore.ErrNotFound) {
+			return http.StatusBadGateway, fmt.Errorf("file-store could not destroy %s, so card %s is not purged: %w", fileID, cardID, err)
+		}
 	}
 	for _, attachment := range attachments {
-		if err := a.files.Delete(attachment.FileID, true); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-			return http.StatusBadGateway, fmt.Errorf("file-store could not destroy %s, so card %s is not purged: %w", attachment.FileID, cardID, err)
-		}
 		if err := a.store.DeleteCardAttachment(cardID, attachment.FileID); err != nil && !errors.Is(err, db.ErrNotFound) {
 			return 500, err
 		}

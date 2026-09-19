@@ -105,10 +105,24 @@ func (c *Client) Upload(content io.Reader, contentLength int64, contentType, fil
 
 // FilesOfCard lists every live file kanban-store holds for a card, by id.
 func (c *Client) FilesOfCard(cardID string) (map[string]*File, error) {
+	return c.filesOfCard(cardID, false)
+}
+
+// EveryFileOfCard is FilesOfCard with the files file-store holds as deleted: the
+// ones that were taken off the card, which file-store keeps so that a removal
+// can be undone. Purging a card has to reach those too.
+func (c *Client) EveryFileOfCard(cardID string) (map[string]*File, error) {
+	return c.filesOfCard(cardID, true)
+}
+
+func (c *Client) filesOfCard(cardID string, includeDeleted bool) (map[string]*File, error) {
 	files := map[string]*File{}
 	const page = 500
 	for offset := 0; ; offset += page {
 		query := url.Values{"owner_service": {OwnerService}, "owner_ref": {cardID}, "limit": {fmt.Sprint(page)}, "offset": {fmt.Sprint(offset)}}
+		if includeDeleted {
+			query.Set("include_deleted", "true")
+		}
 		request, err := http.NewRequest(http.MethodGet, c.BaseURL+"/files?"+query.Encode(), nil)
 		if err != nil {
 			return nil, err

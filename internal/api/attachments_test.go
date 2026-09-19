@@ -79,7 +79,7 @@ func (f *fakeFileStore) handler() http.Handler {
 		for i := 1; i <= f.seq; i++ {
 			id := fmt.Sprintf("file_%06d", i)
 			record, held := f.files[id]
-			if held && !f.deleted[id] && record["owner_service"] == r.URL.Query().Get("owner_service") && record["owner_ref"] == r.URL.Query().Get("owner_ref") {
+			if held && (!f.deleted[id] || r.URL.Query().Get("include_deleted") == "true") && record["owner_service"] == r.URL.Query().Get("owner_service") && record["owner_ref"] == r.URL.Query().Get("owner_ref") {
 				out = append(out, record)
 			}
 		}
@@ -304,9 +304,21 @@ func TestPurgingACardDestroysItsFilesOrDoesNotHappen(t *testing.T) {
 	files.down = false
 	mustStatus(t, requestAs(t, h, asService, "GET", "/api/cards/"+f.supportCardID, nil), 200, "the card is still there")
 
+	// A file taken off the card earlier has no row here and is still in
+	// file-store, deleted and restorable. The purge has to reach it too.
+	w = sendBytes(t, h, asService, "/api/cards/"+f.supportCardID+"/attachments?filename=removed-earlier.txt", "text/plain", []byte("b"))
+	mustStatus(t, w, 201, "attach a second")
+	var removedEarlier model.CardAttachment
+	decodeSuccessfulResponse(t, w, &removedEarlier)
+	mustStatus(t, requestAs(t, h, asService, "DELETE", "/api/cards/"+f.supportCardID+"/attachments/"+removedEarlier.FileID, nil), 204, "take it off the card")
+
 	mustStatus(t, requestAs(t, h, asService, "DELETE", "/api/cards/"+f.supportCardID+"?hard=true", nil), 200, "purge")
-	if len(files.purged) != 1 || files.purged[0] != attached.FileID {
-		t.Errorf("file-store purged %v, want %s", files.purged, attached.FileID)
+	purged := map[string]bool{}
+	for _, id := range files.purged {
+		purged[id] = true
+	}
+	if len(purged) != 2 || !purged[attached.FileID] || !purged[removedEarlier.FileID] {
+		t.Errorf("file-store purged %v, want the live file %s and the one removed earlier, %s", files.purged, attached.FileID, removedEarlier.FileID)
 	}
 }
 

@@ -268,7 +268,9 @@ events on the timeline, carrying the filename, size, type and visibility in
 `detail`; neither moves the clock.
 
 **Purging a card destroys its files first** (`DELETE /api/cards/{id}?hard=true`):
-a card that is gone can no longer say who may read them. If file-store cannot
+a card that is gone can no longer say who may read them. That is every file
+file-store holds for the card, **including the ones taken off it earlier**,
+which have no row here and which file-store keeps so a removal can be undone. If file-store cannot
 destroy them, the answer is **502** and the card is not purged. A reversible
 delete of a card leaves its files alone, as it leaves its placements.
 
