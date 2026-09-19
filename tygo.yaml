@@ -4,11 +4,13 @@
 #
 # A card's item is noteboard's record passed through unchanged, so its type
 # comes from noteboard's own generated package rather than being copied here.
+# The same for an attachment's file, which is file-store's record.
 packages:
   - path: "github.com/kayushkin/kanban-store/internal/model"
     output_path: "ts/model.ts"
     frontmatter: |
       import type { Item as NoteboardItem } from "@kayushkin/noteboard-types";
+      import type { File as FileStoreFile } from "@kayushkin/file-store-types";
     type_mappings:
       "json.RawMessage": "unknown"
       "time.Time": "string"

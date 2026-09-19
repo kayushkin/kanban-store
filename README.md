@@ -234,6 +234,55 @@ linking idempotent.
 The reverse lookup returns parallel `card_id`/`item` pairs so a caller can spot
 orphans — a `null` item means the noteboard item is gone but the link is not.
 
+### Files on a card
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/cards/{id}/attachments` | `[{"card_id":…,"file_id":"file_000001","visibility":…,"attached_by":…,"created_at":…,"file":{…}}]`, oldest first. `?visibility=requester` keeps only those |
+| `POST` | `/api/cards/{id}/attachments?filename=…[&visibility=…]` | The body is the file's bytes and `Content-Type` is what they are. **201** and the attachment |
+| `GET` | `/api/cards/{id}/attachments/{file_id}/content[?inline=true]` | The bytes, with file-store's headers as it sent them. Range requests work |
+| `DELETE` | `/api/cards/{id}/attachments/{file_id}` | **204**. The file comes off the card and is deleted in file-store, reversibly there |
+
+**file-store owns the file; this store owns that it hangs on the card.**
+file-store (`127.0.0.1:8317`) keeps the bytes and the record — name, size,
+declared and detected type, hash — and `file` on an attachment is that record
+passed through unchanged; `null` means file-store no longer has it. This store
+keeps which card a file is on, who put it there, and `visibility`, which is a
+note's vocabulary and means the same: `internal`, or `requester` as well, and
+`internal` when left out.
+
+**A file is reached only through its card.** file-store hands a file to whoever
+holds its service token and decides nothing about who may read it, so this store
+is the only thing between a person and somebody else's attachment. The routes
+sit under `/api/cards/{id}/`, so the gate has held the caller to that card —
+`can_view` to list and download, `can_edit` on every board it sits on to attach
+and remove — and the download checks that the file hangs on **the card in the
+path**: a file id from another card is **404**, however much the caller may see
+elsewhere. There is no route that takes a file id alone.
+
+file-store's refusals are the uploader's to read and come through as it wrote
+them — **400** for no filename or no content type, **413** over its size limit,
+which it serves at `GET /limits`. Its failures are **502**, and leave no row
+here. Attaching and removing are `attachment_added` and `attachment_removed`
+events on the timeline, carrying the filename, size, type and visibility in
+`detail`; neither moves the clock.
+
+**Purging a card destroys its files first** (`DELETE /api/cards/{id}?hard=true`):
+a card that is gone can no longer say who may read them. If file-store cannot
+destroy them, the answer is **502** and the card is not purged. A reversible
+delete of a card leaves its files alone, as it leaves its placements.
+
+Without `FILE_STORE_URL` this store has no attachments and every route above is
+**503**: a card's files are then unknown, which is not the same as none. The
+token reads every file, so it comes from `~/.config/file-store-tokens.env`
+through a host-local drop-in (`kanban-store.service.d/file-store.conf`) — not
+the tracked unit, and not the shared principal-gating file, whose variables
+every agent session inherits.
+
+⚠️ A browser reaches these routes through a proxy, and a proxy has its own body
+limit — nginx's default is 1 MB. An upload refused there never reaches this
+store and answers **413** with nginx's page, not file-store's words.
+
 ### Time people log by hand
 
 | Method | Path | Notes |

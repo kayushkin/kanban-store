@@ -11,6 +11,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/filestore"
 	"github.com/kayushkin/kanban-store/internal/grantstore"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/multichat"
@@ -46,6 +47,19 @@ func main() {
 	bundleStoreURL := config.BundleStoreURL()
 	nb := noteboard.New(noteboardURL)
 	a := api.New(store, nb, principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
+
+	// Attachments live in file-store. Without it this store has none, and the
+	// attachment routes answer 503 rather than report that a card has no files.
+	if fileStoreURL := config.FileStoreURL(); fileStoreURL != "" {
+		fileStoreToken := config.FileStoreServiceToken()
+		if fileStoreToken == "" {
+			log.Fatal("FILE_STORE_URL is set but FILE_STORE_SERVICE_TOKEN is not: file-store takes no call without it")
+		}
+		a.SetFileStore(filestore.New(fileStoreURL, fileStoreToken))
+		log.Printf("attachments: files are kept in file-store at %s", fileStoreURL)
+	} else {
+		log.Printf("attachments: FILE_STORE_URL is not set; the attachment routes answer 503")
+	}
 
 	// Message triggers send through multichat only when MULTICHAT_URL is set.
 	// Without it they still match and render, and each delivery is recorded as

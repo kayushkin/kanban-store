@@ -12,6 +12,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
+	"github.com/kayushkin/kanban-store/internal/filestore"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
 	"github.com/kayushkin/kanban-store/internal/messaging"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -38,6 +39,9 @@ type API struct {
 	// principalEnforcement is nil unless SetPrincipalEnforcement was called;
 	// see principal_access.go.
 	principalEnforcement *PrincipalEnforcement
+	// files is file-store, which owns uploaded bytes. Nil until SetFileStore is
+	// called, and then every attachment route answers 503; see attachments.go.
+	files *filestore.Client
 }
 
 func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client) *API {
@@ -752,6 +756,19 @@ func (a *API) cardScoped(w http.ResponseWriter, r *http.Request) {
 			a.cardTimeEntries(w, r, cardID)
 			return
 		}
+	case "attachments":
+		if len(parts) == 2 {
+			a.cardAttachments(w, r, cardID)
+			return
+		}
+		if len(parts) == 3 && parts[2] != "" {
+			a.cardAttachmentByFile(w, r, cardID, parts[2])
+			return
+		}
+		if len(parts) == 4 && parts[2] != "" && parts[3] == "content" {
+			a.cardAttachmentContent(w, r, cardID, parts[2])
+			return
+		}
 	case "assignments":
 		if len(parts) == 2 {
 			a.cardAssignments(w, r, cardID)
@@ -874,6 +891,15 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 		writeJSON(w, 200, item)
 	case "DELETE":
 		hard := r.URL.Query().Get("hard") == "true"
+		if hard {
+			// A purged card's files go with it, first: they are what is left
+			// of what people sent, and a card that is gone can no longer say
+			// who may read them. If they cannot be destroyed the card stays.
+			if status, err := a.purgeAttachmentsOfCard(cardID); err != nil {
+				writeError(w, status, err.Error())
+				return
+			}
+		}
 		if err := a.noteboard.DeleteItem(cardID, hard); err != nil {
 			writeError(w, 502, err.Error())
 			return

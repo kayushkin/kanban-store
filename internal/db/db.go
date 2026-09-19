@@ -47,6 +47,10 @@ func New(dbPath string) (*Store, error) {
 	if err := migrateBoardTagRules(db); err != nil {
 		return nil, err
 	}
+	if err := migrateCardAttachments(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
