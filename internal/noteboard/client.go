@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -259,4 +260,70 @@ func (c *Client) doJSON(req *http.Request, want int, itemID string) (Item, error
 		return nil, err
 	}
 	return item, nil
+}
+
+// ItemsQuery is the body of noteboard's POST /api/items/query: of these items,
+// which match, in what order. The filter and sort fields are noteboard's and
+// are sent as the caller gave them; noteboard owns their vocabulary (its
+// GET /api/items/query-options) and its refusal comes back as a
+// *QueryRefusedError for the caller to relay, not to re-judge here.
+type ItemsQuery struct {
+	IDs          []string `json:"ids"`
+	Tags         []string `json:"tags,omitempty"`
+	Priorities   []int    `json:"priorities,omitempty"`
+	Statuses     []string `json:"statuses,omitempty"`
+	DueBefore    string   `json:"due_before,omitempty"`
+	Sort         string   `json:"sort,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
+	Offset       int      `json:"offset,omitempty"`
+	IncludeItems bool     `json:"include_items,omitempty"`
+}
+
+// ItemsQueryResult is noteboard's answer. Items is the page, in order, passed
+// through unchanged like every other item this client carries.
+type ItemsQueryResult struct {
+	Total      int      `json:"total"`
+	IDs        []string `json:"ids"`
+	Items      []Item   `json:"items"`
+	MissingIDs []string `json:"missing_ids"`
+}
+
+// QueryRefusedError is noteboard's 400 on a query: its words, to relay.
+type QueryRefusedError struct{ Body []byte }
+
+func (e *QueryRefusedError) Error() string {
+	return "noteboard refused the query: " + strings.TrimSpace(string(e.Body))
+}
+
+// QueryItems asks noteboard which of the named items match, in what order.
+func (c *Client) QueryItems(query ItemsQuery) (*ItemsQueryResult, error) {
+	body, err := json.Marshal(query)
+	if err != nil {
+		return nil, err
+	}
+	req, _ := http.NewRequest("POST", c.BaseURL+"/api/items/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	answer, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusBadRequest {
+		return nil, &QueryRefusedError{Body: answer}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("noteboard POST /api/items/query: %s — %s", resp.Status, string(answer))
+	}
+	var result ItemsQueryResult
+	if err := json.Unmarshal(answer, &result); err != nil {
+		return nil, fmt.Errorf("noteboard answered a query result that does not parse: %w", err)
+	}
+	if query.IncludeItems && len(result.Items) != len(result.IDs) {
+		return nil, fmt.Errorf("noteboard answered %d ids and %d items for one page", len(result.IDs), len(result.Items))
+	}
+	return &result, nil
 }

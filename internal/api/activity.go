@@ -409,24 +409,19 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		writeError(w, 400, err.Error())
 		return
 	}
-	total, err := a.store.CountColumnCardsMatching(columnID, filter)
+	content, err := cardContentQueryFromRequest(r)
 	if err != nil {
-		writeError(w, 500, err.Error())
+		writeError(w, 400, err.Error())
 		return
 	}
-	placements, err := a.store.ListPlacementsByColumnMatching(columnID, filter, limit, offset)
+	placements, items, total, err := a.columnPage(columnID, filter, content, limit, offset)
 	if err != nil {
-		writeError(w, 500, err.Error())
+		writeCardReadError(w, err)
 		return
 	}
 	ids := make([]string, len(placements))
 	for i, p := range placements {
 		ids[i] = p.CardID
-	}
-	items, err := a.noteboard.GetItems(ids)
-	if err != nil {
-		writeError(w, 502, err.Error())
-		return
 	}
 	linksByCard, err := a.store.ListCardLinksForCards(ids)
 	if err != nil {

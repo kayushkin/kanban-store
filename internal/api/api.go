@@ -475,9 +475,18 @@ func (a *API) boardCards(w http.ResponseWriter, r *http.Request, boardID string)
 			writeError(w, 400, err.Error())
 			return
 		}
-		view, err := a.assembleBoardView(boardID, limit, filter)
+		content, err := cardContentQueryFromRequest(r)
 		if err != nil {
-			mapDBErr(w, err)
+			writeError(w, 400, err.Error())
+			return
+		}
+		view, err := a.assembleBoardView(boardID, limit, filter, content)
+		if err != nil {
+			if content.isEmpty() {
+				mapDBErr(w, err)
+			} else {
+				writeCardReadError(w, err)
+			}
 			return
 		}
 		writeJSON(w, 200, view)
@@ -1387,7 +1396,7 @@ func cardFilterFromQuery(r *http.Request) (db.CardFilter, error) {
 	return filter, nil
 }
 
-func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter) (*model.BoardView, error) {
+func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter, content cardContentQuery) (*model.BoardView, error) {
 	b, err := a.store.GetBoard(boardID)
 	if err != nil {
 		return nil, err
@@ -1398,30 +1407,22 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter)
 	}
 	// Per column, so a limit means "this many of each" rather than a slice of one
 	// arbitrary column, and so the count a client needs for "show more" is exact.
+	// columnPage cuts each page after every filter, this store's and noteboard's.
 	var placements []*model.Placement
+	var items []noteboard.Item
 	totals := map[string]int{}
 	for _, c := range cols {
-		// The total is of the cards the filter keeps, so "showing 25 of 310"
-		// stays true of what is on screen.
-		total, err := a.store.CountColumnCardsMatching(c.ID, filter)
+		page, pageItems, total, err := a.columnPage(c.ID, filter, content, limit, 0)
 		if err != nil {
 			return nil, err
 		}
 		totals[c.ID] = total
-		page, err := a.store.ListPlacementsByColumnMatching(c.ID, filter, limit, 0)
-		if err != nil {
-			return nil, err
-		}
 		placements = append(placements, page...)
+		items = append(items, pageItems...)
 	}
-	// Fetch all noteboard items in one fan-out.
 	ids := make([]string, len(placements))
 	for i, p := range placements {
 		ids[i] = p.CardID
-	}
-	items, err := a.noteboard.GetItems(ids)
-	if err != nil {
-		return nil, err
 	}
 	// Events and links for exactly the cards on screen, one query each. The links
 	// used to be one query per card, which on the largest board here is 6,466 of

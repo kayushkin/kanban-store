@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,9 @@ type fakeNoteboard struct {
 	// of applying the change. noteboard being reachable for the create and
 	// unreachable a millisecond later is the ordinary case, not an exotic one.
 	patchStatus int
+	// queries counts POST /api/items/query calls, so a test can tell a read
+	// that asked noteboard to filter from one that had no need to.
+	queries int
 	// versions counts writes. An item's updated_at is its version, and the ids
 	// above must not move when a PATCH takes one.
 	versions int
@@ -120,6 +124,118 @@ func (f *fakeNoteboard) handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, out)
+	})
+
+	// POST /api/items/query, as noteboard answers it (noteboard model/items_query.go
+	// and internal/db/items_query.go at 41d488b, measured live 2026-09-20): an
+	// unknown field or sort is a 400; an item must carry ALL the tags and ANY of
+	// the priorities and statuses; a sort's ties fall back to the order the ids
+	// were sent in; the page is cut after the filter; total counts the matches;
+	// missing_ids are the ids naming no live item, whatever the filter.
+	mux.HandleFunc("POST /api/items/query", func(w http.ResponseWriter, r *http.Request) {
+		var query struct {
+			IDs          []string `json:"ids"`
+			Tags         []string `json:"tags"`
+			Priorities   []int    `json:"priorities"`
+			Statuses     []string `json:"statuses"`
+			DueBefore    string   `json:"due_before"`
+			Sort         string   `json:"sort"`
+			Limit        int      `json:"limit"`
+			Offset       int      `json:"offset"`
+			IncludeItems bool     `json:"include_items"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&query); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		sorts := map[string]bool{"": true, "given": true, "priority": true, "due_at": true, "updated_at": true, "created_at": true, "title": true}
+		if !sorts[query.Sort] {
+			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("sort %q is not one of [given priority due_at updated_at created_at title] (GET /api/items/query-options)", query.Sort)})
+			return
+		}
+		f.mu.Lock()
+		f.queries++
+		type match struct {
+			position int
+			item     map[string]any
+		}
+		matches := []match{}
+		missing := []string{}
+		for position, id := range query.IDs {
+			item, held := f.items[id]
+			if _, deleted := item["deleted_at"]; !held || deleted {
+				missing = append(missing, id)
+				continue
+			}
+			keep := true
+			carried := map[string]bool{}
+			if tags, ok := item["tags"].([]any); ok {
+				for _, tag := range tags {
+					carried[fmt.Sprint(tag)] = true
+				}
+			}
+			for _, tag := range query.Tags {
+				keep = keep && carried[tag]
+			}
+			priority := 0
+			if number, ok := item["priority"].(float64); ok {
+				priority = int(number)
+			}
+			if len(query.Priorities) > 0 {
+				any := false
+				for _, wanted := range query.Priorities {
+					any = any || wanted == priority
+				}
+				keep = keep && any
+			}
+			if len(query.Statuses) > 0 {
+				any := false
+				for _, wanted := range query.Statuses {
+					any = any || wanted == item["status"]
+				}
+				keep = keep && any
+			}
+			if keep {
+				matches = append(matches, match{position, clone(item)})
+			}
+		}
+		f.mu.Unlock()
+		priorityOf := func(item map[string]any) float64 { number, _ := item["priority"].(float64); return number }
+		sort.SliceStable(matches, func(i, j int) bool {
+			switch query.Sort {
+			case "priority":
+				if priorityOf(matches[i].item) != priorityOf(matches[j].item) {
+					return priorityOf(matches[i].item) > priorityOf(matches[j].item)
+				}
+			case "title":
+				left, right := strings.ToLower(fmt.Sprint(matches[i].item["title"])), strings.ToLower(fmt.Sprint(matches[j].item["title"]))
+				if left != right {
+					return left < right
+				}
+			}
+			return matches[i].position < matches[j].position
+		})
+		total := len(matches)
+		if query.Offset > len(matches) {
+			query.Offset = len(matches)
+		}
+		matches = matches[query.Offset:]
+		if query.Limit > 0 && query.Limit < len(matches) {
+			matches = matches[:query.Limit]
+		}
+		answer := map[string]any{"total": total, "ids": []string{}, "missing_ids": missing}
+		ids, items := []string{}, []map[string]any{}
+		for _, kept := range matches {
+			ids = append(ids, fmt.Sprint(kept.item["id"]))
+			items = append(items, kept.item)
+		}
+		answer["ids"] = ids
+		if query.IncludeItems {
+			answer["items"] = items
+		}
+		writeJSON(w, 200, answer)
 	})
 
 	mux.HandleFunc("PATCH /api/items/{id}", func(w http.ResponseWriter, r *http.Request) {

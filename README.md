@@ -149,7 +149,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/boards/{id}/access` | What the caller of this request may do on the board: `{"principal_id":…,"unrestricted":…,"relations":["can_view","can_edit"]}`. `relations` is every relation that holds, weakest first, with the inclusion rule already applied — ask whether the one you need is in it. Needs `can_view`; **404** otherwise |
-| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=` keep matching cards — see [Filtering a board](#filtering-a-board) |
+| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=`, `?tag=`, `?priority=`, `?status=`, `?due_before=` keep matching cards and `?sort=` orders each column — see [Filtering a board](#filtering-a-board) |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
 | `DELETE` | `/api/boards/{id}/cards/{cardID}` | Detaches from this board only; the item survives |
@@ -741,13 +741,13 @@ Without a limit the board view still returns everything, so existing callers are
 unaffected — but on this host's largest board that is **12 MB and 1.6 seconds per
 read**, on a page that polls every fifteen seconds.
 
-⚠️ **Paging is in stored order, which is not the order a board displays.** What a
-client sorts by — priority, due date, title — lives in noteboard, so ordering a
-whole board here would mean fetching every item on it, which is the cost paging
-exists to avoid. A client showing a page therefore sorts what it has, and has to
-say so on screen. Sorting the full column server-side needs a batch item read on
-noteboard (`GET /api/items?ids=…`), which does not exist yet — see [The noteboard
-contract](#the-noteboard-contract).
+**Paging is in stored order unless `?sort=` says otherwise.** What a client
+sorts by — priority, due date, title — lives in noteboard, and until 2026-09-20
+sorting a whole column meant fetching every item in it, so a client sorted the
+page it had. `?sort=` now sends the column's ids to noteboard's
+`POST /api/items/query`, which orders the whole column and answers one page of
+it — see [Filtering a board](#filtering-a-board). Without `?sort=` a page is
+still in stored order and costs nothing extra.
 
 ### Filtering a board
 
@@ -773,11 +773,32 @@ match".
 A ticket's lifecycle state is not a parameter because it is already a column:
 read the columns whose `lifecycle_state` is the one you want.
 
-⚠️ **Tags, priority and due date cannot be filtered here**, for the reason a
-board cannot be sorted by them: they live in noteboard, and looking would mean
-fetching every item on the board. `/api/search?q=…&board_id=…` is the full-text
-route; a tag or priority filter over a whole board needs the same batch read on
-noteboard that server-side sorting does.
+**By what a card says.** Tags, priority, status and due date live in noteboard,
+so those filters — and sorting — are noteboard's to answer:
+
+| Parameter | Keeps or does |
+|---|---|
+| `tag=billing&tag=urgent` | cards carrying **all** of these tags, matched exactly |
+| `priority=3&priority=2` | cards whose priority is **any** of these (a ladder rung's value) |
+| `status=open` | cards whose noteboard status is any of these |
+| `due_before=2026-09-20T17:00:00-07:00` | cards due before that instant |
+| `sort=priority` | the order of each column: one of noteboard's `GET /api/items/query-options` — `given`, `priority`, `due_at`, `updated_at`, `created_at`, `title`. Ties keep the column's stored order |
+
+When any of these is set, a column's card ids — already narrowed by the
+parameters above, which run in this store's own SQL — go to noteboard's
+`POST /api/items/query`, which filters, sorts and pages them and answers the
+page's items in the same call. The page is cut **after both** halves and
+`total` counts what matched both. Measured 2026-09-20 on this host's largest
+board, 9,506 cards: about 100 ms. When none is set, noteboard is not asked to
+filter anything and a read costs what it did before.
+
+This store judges what it can without asking — that a `priority` is a number
+and `due_before` an RFC 3339 time — and refuses those itself (**400**). **What a
+sort or a status may be is noteboard's vocabulary, and this store keeps no copy
+of it**: they go through as written, and noteboard's refusal comes back
+unchanged, **400**, in its words. A card whose noteboard item is gone cannot
+match such a query, so a filtered or sorted read reports no `orphans`; an
+unfiltered one still does.
 
 A page of a column carries each card's `ticket`, as the board view does. It did
 not until 2026-09-18, so a ticket list lost its requesters on page two.
