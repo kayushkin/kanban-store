@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/grantstore"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -82,8 +83,8 @@ type PrincipalEnforcement struct {
 // client. It panics on a short token or a nil client, at boot, because either
 // would leave the store open while its log says it is checking callers.
 func (a *API) SetPrincipalEnforcement(enforcement PrincipalEnforcement) {
-	if len(enforcement.ServiceToken) < 32 {
-		panic("kanban-store: the service token must be at least 32 characters, or requests that omit the header would be unrestricted")
+	if len(enforcement.ServiceToken) < config.MinimumServiceTokenLength {
+		panic(fmt.Sprintf("kanban-store: the service token must be at least %d characters, or requests that omit the header would be unrestricted", config.MinimumServiceTokenLength))
 	}
 	if enforcement.Grants == nil {
 		panic("kanban-store: a grant-store client is required; board access is read from it on every request")
@@ -319,6 +320,11 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 		return strings.Split(strings.TrimPrefix(path, prefix), "/")
 	}
 	switch {
+	case path == SettingsPath:
+		// Addresses, paths and which secrets are set: the operator's, so the
+		// service token or an administrator, both of whom are past this table.
+		return &accessRefusal{status: http.StatusForbidden, message: "settings are read with " + ServiceTokenHeader + " or by an administrator"}, nil
+
 	case path == "/api/entity-types", path == "/api/message-trigger-options",
 		path == "/api/ticket-channels", path == "/api/ticket-lifecycle-states", path == "/api/note-visibilities":
 		// Vocabularies: what a channel or a lifecycle state may be. They name

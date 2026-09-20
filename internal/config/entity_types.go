@@ -1,7 +1,11 @@
-// Package config holds static, host-agnostic configuration. The entity-type
-// registry lets agents self-discover where to look up entity refs they find
-// in card_links / entity_tags. kanban-store does NOT proxy to these services
-// (dumb store) — it just publishes the map.
+// Package config holds the service's configuration. settings.go declares every
+// environment variable the process reads, once, with llm-bridge
+// servicesettings: the command reads its configuration from the registry built
+// there, GET /settings describes the service from it, and a test holds every
+// os.Getenv in the repo to it. The entity-type registry below is static and
+// host-agnostic: it lets agents self-discover where to look up entity refs they
+// find in card_links / entity_tags. kanban-store does NOT proxy to these
+// services (dumb store) — it just publishes the map.
 package config
 
 import "github.com/kayushkin/kanban-store/internal/model"

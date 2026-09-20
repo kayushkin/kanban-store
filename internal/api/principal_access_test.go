@@ -101,7 +101,7 @@ func setupWithPrincipalEnforcement(t *testing.T) (http.Handler, *fakeGrantStore,
 	t.Cleanup(func() { store.Close() })
 	notes := httptest.NewServer(newFakeNoteboard().handler())
 	t.Cleanup(notes.Close)
-	a := api.New(store, noteboard.New(notes.URL), principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL))
+	a := api.New(store, noteboard.New(notes.URL), principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL), settingsRegistryForTests(t))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(grantServer.URL, "grant-store-token")})
 	return a.Handler(), grants, store
 }
@@ -366,7 +366,7 @@ func TestGrantStoreDownRefusesRatherThanServing(t *testing.T) {
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closedURL := closed.URL
 	closed.Close()
-	a := api.New(store, noteboard.New(closedURL), principalstore.New(closedURL), llmbridge.New(closedURL), bundlestore.New(closedURL))
+	a := api.New(store, noteboard.New(closedURL), principalstore.New(closedURL), llmbridge.New(closedURL), bundlestore.New(closedURL), settingsRegistryForTests(t))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(closedURL, "")})
 	mustStatus(t, requestAs(t, a.Handler(), asPrincipal(alice), "GET", "/api/boards", nil), 502, "grant-store unreachable")
 }

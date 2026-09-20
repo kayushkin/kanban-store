@@ -179,6 +179,18 @@ assert_eq 0       "$(jget '.counts.boards')"   "fresh db board count"
 assert_eq 0       "$(jget '.counts.columns')"  "fresh db column count"
 assert_eq 0       "$(jget '.counts.placements')" "fresh db placement count"
 
+step "GET /settings — the registry the server reads from is the one it serves"
+# A registry that is built and never read from would show the default port, and
+# no unit test sees that: only a real boot on a port of the smoke's choosing does.
+CODE=$(req GET /settings); expect 200 "$CODE" "/settings with the service token"
+assert_eq kanban-store "$(jget '.service')" "settings service name"
+assert_eq "$PORT"      "$(jget '.settings[] | select(.key=="listen_port") | .value')"  "settings listen_port is the port this smoke chose"
+assert_eq environment  "$(jget '.settings[] | select(.key=="listen_port") | .source')" "settings listen_port source"
+assert_eq "$DB_PATH"   "$(jget '.settings[] | select(.key=="database_path") | .value')" "settings database_path"
+if grep -qF "$SERVICE_TOKEN" "$BODY"; then fail "GET /settings carries the service token"; fi
+assert_eq 401 "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/settings")" "/settings with no caller"
+CODE=$(req PUT /settings/noteboard_url '{"value":"http://elsewhere.example"}'); expect 404 "$CODE" "PUT /settings/{key} has no route"
+
 step "POST /api/boards — create a board and read it back"
 BOARD_NAME="e2e smoke board $$"
 CODE=$(req POST /api/boards "{\"name\":\"$BOARD_NAME\",\"description\":\"created by e2e-smoke\"}")

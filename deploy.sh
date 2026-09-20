@@ -70,6 +70,21 @@ make build
 [ -x "$STAGED" ] || fail "make build produced no binary at $STAGED"
 echo "    built: $(ls -lh "$STAGED" | awk '{print $5}')"
 
+step "check the running service's environment against the declared settings"
+# A misspelled KANBAN_PORT / KANBAN_DB / KANBAN_NOTEBOARD_URL /
+# KANBAN_STORE_SERVICE_TOKEN, a port that is not a number, a short service
+# token, or an address set without its token stops the new binary at boot. Ask
+# before the old one is stopped: build the registry from the running service's
+# own environment. The test prints a verdict, never a value.
+live_pid="$(systemctl --user show -p MainPID --value "$UNIT_NAME")"
+if [ -n "$live_pid" ] && [ "$live_pid" != "0" ]; then
+  go test -count=1 -run '^TestTheLiveProcessEnvironmentBuildsARegistry$' ./internal/config -args -live-environment-file="/proc/$live_pid/environ" \
+    || fail "the running $UNIT_NAME's environment would stop the new binary at boot — not installing"
+  echo "    the new binary starts in the running service's environment"
+else
+  echo "    $UNIT_NAME is not running, so there is no environment to check"
+fi
+
 step "provenance — refuse a binary that cannot be traced to a commit"
 # `go build` writes no VCS stamp when it cannot find a .git DIRECTORY, and it does
 # not fail when that happens -- not even with -buildvcs=true, and not even with no

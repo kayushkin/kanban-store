@@ -489,7 +489,7 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundle
 	}
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
-	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL))
+	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL), settingsRegistryForTests(t))
 	// Every request needs a credential now, so the shared harness acts as an
 	// internal service: `do` below sends the service token. The per-principal
 	// rules have their own harness in principal_access_test.go, which points

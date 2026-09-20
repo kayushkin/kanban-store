@@ -72,7 +72,7 @@ func setupWithMessageSender(t *testing.T, sender messaging.Sender) (http.Handler
 	}
 	t.Cleanup(func() { store.Close() })
 	nb := noteboard.New(notes.URL)
-	a := api.New(store, nb, principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL))
+	a := api.New(store, nb, principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL), settingsRegistryForTests(t))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New("http://127.0.0.1:1", "")})
 	if sender != nil {
 		a.SetMessageSender(sender)

@@ -50,7 +50,7 @@ func buildContentDesk(t *testing.T) *contentDesk {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	a := api.New(store, noteboard.New(urls["notes"]), principalstore.New(urls["principals"]), llmbridge.New(urls["bridge"]), bundlestore.New(urls["bundles"]))
+	a := api.New(store, noteboard.New(urls["notes"]), principalstore.New(urls["principals"]), llmbridge.New(urls["bridge"]), bundlestore.New(urls["bundles"]), settingsRegistryForTests(t))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(urls["grants"], "grant-store-token")})
 	d := &contentDesk{h: a.Handler(), notes: notes, titleOf: map[string]string{}}
 

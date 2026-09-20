@@ -19,6 +19,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
 	"github.com/kayushkin/kanban-store/internal/timeaccounting"
+	"github.com/kayushkin/llm-bridge/servicesettings"
 )
 
 type API struct {
@@ -42,11 +43,23 @@ type API struct {
 	// files is file-store, which owns uploaded bytes. Nil until SetFileStore is
 	// called, and then every attachment route answers 503; see attachments.go.
 	files *filestore.Client
+	// settings is what GET /settings describes: every environment variable the
+	// process reads, as config.SettingDefinitions declares them.
+	settings *servicesettings.Registry
 }
 
-func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client) *API {
-	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge, bundles: bundles, messages: messaging.NewDispatcher(store, nb)}
+// New panics on a nil settings registry, at boot: the registry is an argument
+// rather than a setter so that no command can serve boards and forget
+// GET /settings.
+func New(store *db.Store, nb *noteboard.Client, principals *principalstore.Client, bridge *llmbridge.Client, bundles *bundlestore.Client, settings *servicesettings.Registry) *API {
+	if settings == nil {
+		panic("kanban-store: a settings registry is required; GET /settings describes the service from it")
+	}
+	return &API{store: store, noteboard: nb, principals: principals, bridge: bridge, bundles: bundles, messages: messaging.NewDispatcher(store, nb), settings: settings}
 }
+
+// SettingsPath is where servicesettings.Handler is mounted.
+const SettingsPath = "/settings"
 
 func (a *API) Handler() http.Handler {
 	return cors(a.principalGate(a.routes()))
@@ -58,6 +71,10 @@ func (a *API) Handler() http.Handler {
 func (a *API) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", a.health)
+
+	// what the process was started with; the service token or an administrator.
+	// Nothing is Editable, so PUT /settings/{key} is not mounted.
+	mux.Handle(SettingsPath, servicesettings.Handler(a.settings, SettingsPath))
 
 	// boards
 	mux.HandleFunc("/api/boards", a.boards)

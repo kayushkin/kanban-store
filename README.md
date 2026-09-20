@@ -57,14 +57,36 @@ KANBAN_NOTEBOARD_URL=http://localhost:8191 ./bin/kanban-store
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `KANBAN_PORT` | `8305` | Port to listen on |
-| `KANBAN_DB` | `$HOME/.kanban-store/kanban-store.db` | SQLite file; created with its schema on first run |
+| `KANBAN_PORT` | `8305` | Port to listen on; a value that is not a whole number stops the start |
+| `KANBAN_DB` | `$HOME/.kanban-store/kanban-store.db` | SQLite file; created with its schema on first run. With no home directory and no value the service refuses to start |
 | `KANBAN_NOTEBOARD_URL` | `http://localhost:8191` | Base URL of the noteboard service |
-| `PRINCIPAL_STORE_URL` | `http://127.0.0.1:8314` | Base URL of principal-store, asked once per card assignment whether the principal exists |
+| `PRINCIPAL_STORE_URL` | `http://127.0.0.1:8314` | Base URL of principal-store: the calling principal is read there, and a principal is checked there before a card assignment |
+| `LLM_BRIDGE_URL` | `http://127.0.0.1:8160` | Base URL of llm-bridge-server, asked before a board's default agent or instance is written |
+| `BUNDLE_STORE_URL` | `http://127.0.0.1:8307` | Base URL of bundle-store, asked before a board's default bundle is written |
+| `FILE_STORE_URL` | none | Base URL of file-store. Unset, every attachment route answers 503 |
+| `FILE_STORE_SERVICE_TOKEN` | none | Secret. Required when `FILE_STORE_URL` is set |
+| `MULTICHAT_URL` | none | Base URL of multichat. Unset, message triggers are recorded `not_configured` and nothing is sent |
+| `AUTH_STORE_URL` | `http://127.0.0.1:8303` | Base URL of auth-store, where multichat's API token is resolved |
+| `AUTH_STORE_TOKEN` | none | Secret. Required when `MULTICHAT_URL` is set |
+| `KANBAN_STORE_SERVICE_TOKEN` | none, required | Secret, at least 32 characters: what internal services present |
+| `GRANT_STORE_URL` | none, required | Base URL of grant-store, where board access is read |
+| `GRANT_STORE_SERVICE_TOKEN` | none, required | Secret, at least 32 characters: what grant-store asks of this service |
+
+These fourteen are every environment variable the process reads. Each is declared
+once, in `internal/config/settings.go`, with llm-bridge's `servicesettings`; the
+command reads its configuration from that registry, `GET /settings` describes the
+service from it, and a test fails on any `os.Getenv` the declarations do not
+name. A set variable that starts with `KANBAN_PORT`, `KANBAN_DB`,
+`KANBAN_NOTEBOARD` or `KANBAN_STORE_SERVICE_TOKEN` and is not declared stops the
+start and is named in the log: `KANBAN_DB_PATH` is a misspelling, and someone
+believes it does something. The service does not own all of `KANBAN_`, because
+`KANBAN_STORE_URL` and `KANBAN_URL` are how other services find it.
 
 `systemd/kanban-store.service` is a `--user` unit. `deploy.sh` reads the binary
 path, port and database path back *out of* that unit rather than restating them,
-builds, runs the test suite and an end-to-end smoke on a throwaway database,
+builds, runs the test suite, builds the settings registry from the running
+service's environment (so a variable that would stop the new binary is found
+before the old one is stopped), runs an end-to-end smoke on a throwaway database,
 installs, restarts, and rolls back to a timestamped backup if the new binary
 will not answer.
 
@@ -100,6 +122,15 @@ All request and response bodies are JSON.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/health` | `{"status":"ok","counts":{…}}` — row counts per table |
+
+### Settings
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/settings` | What the process was started with: every declared setting, its kind (`wiring`, `path`, `secret`, `behaviour`), the value in force and whether it came from the environment or the default. A secret shows only whether it is set. **The service token or an administrator only**: a member is 403 whatever boards they hold, and no caller is 401 |
+
+Nothing is editable, so there is no `PUT /settings/{key}`: a setting changes in
+the unit or a drop-in, and takes effect on restart.
 
 ### Boards
 
