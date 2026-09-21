@@ -111,8 +111,17 @@ type Ticket struct {
 	// an id: an address is a name, and one person writes from three of them.
 	RequesterPrincipalID string        `json:"requester_principal_id"`
 	Channel              TicketChannel `json:"channel"`
-	CreatedAt            time.Time     `json:"created_at"`
-	UpdatedAt            time.Time     `json:"updated_at"`
+	// SourceEntityType and SourceEntityRef name the record that made this card
+	// a ticket — for an email ticket, the message: type "email", ref
+	// "<account_id>:<provider message id>", the same pair its card link
+	// carries. Written once and never changed, unlike the card's links, which
+	// merges and refiles move: this is the record of where the ticket came
+	// from, and the links are where its mail sits now. Both are empty on a
+	// ticket written before the field existed, or by a caller with no source.
+	SourceEntityType string    `json:"source_entity_type,omitempty"`
+	SourceEntityRef  string    `json:"source_entity_ref,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // TicketPlacementState is the lifecycle a ticket has **on one board**, read
@@ -149,4 +158,28 @@ type TicketView struct {
 type TicketWriteRequest struct {
 	RequesterPrincipalID string `json:"requester_principal_id"`
 	Channel              string `json:"channel"`
+	// SourceEntityType and SourceEntityRef are optional and go together. A
+	// ticket that already has a source keeps it: a write that omits the pair
+	// leaves it alone, the same pair again is accepted, and a different pair is
+	// a 409.
+	SourceEntityType string `json:"source_entity_type,omitempty"`
+	SourceEntityRef  string `json:"source_entity_ref,omitempty"`
+}
+
+// TicketLogEntry is one row of GET /api/tickets: a ticket, its lifecycle, and
+// when its card was created, so a reader can tell a ticket that arrived as a
+// new card from an existing card that became a ticket.
+type TicketLogEntry struct {
+	TicketView
+	// CardCreatedAt is the card's card_created event. Absent when the card
+	// predates that event (2026-08-21); such a card is older than any ticket.
+	CardCreatedAt *time.Time `json:"card_created_at,omitempty"`
+}
+
+// TicketList is the body of GET /api/tickets, newest ticket first.
+// NextBefore is the created_at to pass as ?before= for the next page, absent
+// on the last page.
+type TicketList struct {
+	Tickets    []TicketLogEntry `json:"tickets"`
+	NextBefore *time.Time       `json:"next_before,omitempty"`
 }

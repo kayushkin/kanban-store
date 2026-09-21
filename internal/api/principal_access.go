@@ -432,7 +432,7 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 	case path == "/api/tags":
 		return &accessRefusal{status: http.StatusForbidden, message: "the tag listing spans every board and is not available under principal enforcement"}, nil
 
-	case path == "/api/assignments", path == "/api/search":
+	case path == "/api/assignments", path == "/api/search", path == "/api/tickets":
 		return nil, nil // filtered by the handler
 
 	case path == "/api/bulk-card-commands":

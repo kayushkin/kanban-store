@@ -106,7 +106,9 @@ func (a *API) routes() *http.ServeMux {
 	// reverse lookup by principal: every card someone is assigned to
 	mux.HandleFunc("/api/assignments", a.assignmentsByPrincipal)
 
-	// ticket vocabularies: what a channel and a lifecycle state may be
+	// tickets across every board, newest first; and the ticket vocabularies:
+	// what a channel and a lifecycle state may be
+	mux.HandleFunc("/api/tickets", a.listTickets)
 	mux.HandleFunc("/api/ticket-channels", a.ticketChannels)
 	mux.HandleFunc("/api/ticket-lifecycle-states", a.ticketLifecycleStates)
 

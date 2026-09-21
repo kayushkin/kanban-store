@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
@@ -109,7 +111,27 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 		return
 	}
 
-	if _, err := a.store.UpsertTicket(cardID, request.RequesterPrincipalID, channel); err != nil {
+	if (request.SourceEntityType == "") != (request.SourceEntityRef == "") {
+		writeError(w, 400, "source_entity_type and source_entity_ref go together: send both or neither")
+		return
+	}
+	if request.SourceEntityType != "" && !knownEntityType(request.SourceEntityType) {
+		writeError(w, 400, fmt.Sprintf("source_entity_type %q is not in the entity-type registry (GET /api/entity-types)", request.SourceEntityType))
+		return
+	}
+
+	_, err = a.store.UpsertTicket(cardID, request.RequesterPrincipalID, channel, request.SourceEntityType, request.SourceEntityRef)
+	if errors.Is(err, db.ErrTicketSourceConflict) {
+		stored, readErr := a.store.GetTicket(cardID)
+		if readErr != nil {
+			writeError(w, 500, readErr.Error())
+			return
+		}
+		writeError(w, 409, fmt.Sprintf("card %s is already a ticket from %s %s; a ticket's source is written once",
+			cardID, stored.SourceEntityType, stored.SourceEntityRef))
+		return
+	}
+	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
@@ -151,6 +173,101 @@ func (a *API) ticketView(cardID string, access *PrincipalBoardAccess) (*model.Ti
 		view.RequesterDisplayName = requester.DisplayName
 	}
 	return view, nil
+}
+
+func knownEntityType(entityType string) bool {
+	for _, info := range config.EntityTypes {
+		if info.Type == entityType {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	defaultTicketListLimit = 50
+	maxTicketListLimit     = 200
+)
+
+// listTickets is GET /api/tickets: every ticket the caller can view, newest
+// first, across boards. ?channel= narrows to one channel; ?before= (RFC 3339,
+// the previous page's next_before) and ?limit= page it.
+func (a *API) listTickets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, 405, "method not allowed")
+		return
+	}
+	query := r.URL.Query()
+	var filter db.TicketListFilter
+	if raw := query.Get("channel"); raw != "" {
+		channel, known := model.NormalizeTicketChannel(raw)
+		if !known {
+			writeError(w, 400, model.ErrUnknownTicketChannel(raw).Error())
+			return
+		}
+		filter.Channel = channel
+	}
+	if raw := query.Get("before"); raw != "" {
+		before, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, 400, fmt.Sprintf("before must be an RFC 3339 time, got %q", raw))
+			return
+		}
+		filter.Before = &before
+	}
+	limit := defaultTicketListLimit
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxTicketListLimit {
+			writeError(w, 400, fmt.Sprintf("limit must be a whole number from 1 to %d, got %q", maxTicketListLimit, raw))
+			return
+		}
+		limit = parsed
+	}
+
+	access := principalBoardAccessFrom(r)
+	page := model.TicketList{Tickets: []model.TicketLogEntry{}}
+	// Read a batch at a time until the page is full or the tickets run out: a
+	// restricted caller may be unable to see most of a batch.
+	for {
+		batch, err := a.store.ListTickets(filter, limit)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		for _, entry := range batch {
+			if len(page.Tickets) == limit {
+				// A visible ticket is past the full page, so there is another.
+				page.NextBefore = &page.Tickets[limit-1].Ticket.CreatedAt
+				writeJSON(w, 200, page)
+				return
+			}
+			created := entry.Ticket.CreatedAt
+			filter.Before = &created
+			visible, err := a.cardVisibleTo(access, entry.Ticket.CardID)
+			if err != nil {
+				writeError(w, 500, err.Error())
+				return
+			}
+			if !visible {
+				continue
+			}
+			view, err := a.ticketView(entry.Ticket.CardID, access)
+			if errors.Is(err, db.ErrNotFound) {
+				continue // deleted since the batch was read
+			}
+			if err != nil {
+				writeTicketError(w, err)
+				return
+			}
+			entry.TicketView = *view
+			page.Tickets = append(page.Tickets, entry)
+		}
+		if len(batch) < limit {
+			break
+		}
+	}
+	writeJSON(w, 200, page)
 }
 
 func writeTicketError(w http.ResponseWriter, err error) {

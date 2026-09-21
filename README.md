@@ -896,12 +896,13 @@ MIT — see [LICENSE](LICENSE).
 
 A ticket is a card that came from outside. The card is still the card — title,
 body and tags in noteboard, placement and history here — and the ticket adds
-the two facts a card has no room for:
+the facts a card has no room for:
 
 | Field | Meaning |
 |---|---|
 | `requester_principal_id` | the principal-store **contact** who asked. Checked on write: an unknown or disabled principal is a 400, a principal-store that cannot answer is a 502 and nothing is written, and a `human` or `group` is a 400 telling the caller to resolve the address with principal-store's `POST /contacts/resolve` first |
 | `channel` | how it reached us, from `GET /api/ticket-channels` — email, portal, chat, phone, agent. Anything else is a 400 naming the vocabulary |
+| `source_entity_type`, `source_entity_ref` | the record that made the card a ticket — for email, `email` and the mailstack locator `<account_id>:<message id>`, the pair the card's email link carries. Optional, and sent together or not at all; the type must be in `GET /api/entity-types`. **Written once**: a write that omits the pair keeps the stored one, the same pair again is accepted, a different pair is a **409**. The card's links show where its mail sits now and merges move them; this shows where the ticket came from. Empty on tickets written before 2026-09-21 that nobody backfilled |
 
 **There is no status field.** A ticket's lifecycle is the column it sits in: a
 column carries `lifecycle_state` from `GET /api/ticket-lifecycle-states` (new,
@@ -920,6 +921,7 @@ pick between them.
 | `GET /api/cards/{id}/ticket` | the ticket, the requester's display name (for rendering only; the id is the handle) and one state per placement. 404 when the card is not a ticket |
 | `PUT /api/cards/{id}/ticket` | upsert; an unknown field is a 400, not a silent drop |
 | `DELETE /api/cards/{id}/ticket` | the card stops being a ticket and stays exactly where it is |
+| `GET /api/tickets` | every ticket the caller can view, newest first, across boards — the conversion log. Each entry is the ticket view above plus `card_created_at`, the card's `card_created` event, so a ticket that arrived as a new card (the two times match) is told apart from an existing card that became one. Absent for cards older than that event (2026-08-21). `?channel=` narrows, `?limit=` (1–200, default 50) and `?before=` (the previous page's `next_before`) page it |
 | `GET /api/ticket-channels`, `GET /api/ticket-lifecycle-states` | the vocabularies |
 
 A board view carries each card's ticket, read in one query with the links and
