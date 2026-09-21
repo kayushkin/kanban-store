@@ -170,7 +170,7 @@ type TicketWriteRequest struct {
 // when its card was created, so a reader can tell a ticket that arrived as a
 // new card from an existing card that became a ticket.
 type TicketLogEntry struct {
-	TicketView
+	TicketView `tstype:",extends"`
 	// CardCreatedAt is the card's card_created event. Absent when the card
 	// predates that event (2026-08-21); such a card is older than any ticket.
 	CardCreatedAt *time.Time `json:"card_created_at,omitempty"`
