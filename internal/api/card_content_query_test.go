@@ -51,6 +51,9 @@ func buildContentDesk(t *testing.T) *contentDesk {
 	}
 	t.Cleanup(func() { store.Close() })
 	a := api.New(store, noteboard.New(urls["notes"]), principalstore.New(urls["principals"]), llmbridge.New(urls["bridge"]), bundlestore.New(urls["bundles"]), settingsRegistryForTests(t))
+	// Cleanups run last-registered first, so this waits for trigger
+	// dispatches before the store above is closed.
+	t.Cleanup(a.WaitForMessageTriggers)
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(urls["grants"], "grant-store-token")})
 	d := &contentDesk{h: a.Handler(), notes: notes, titleOf: map[string]string{}}
 

@@ -490,6 +490,10 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundle
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
 	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL), settingsRegistryForTests(t))
+	// Registered after t.TempDir, so it runs before the directory is removed —
+	// and here rather than only in the returned cleanup, which some callers
+	// discard.
+	t.Cleanup(a.WaitForMessageTriggers)
 	// Every request needs a credential now, so the shared harness acts as an
 	// internal service: `do` below sends the service token. The per-principal
 	// rules have their own harness in principal_access_test.go, which points
@@ -500,6 +504,7 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundle
 		Grants:       grantstore.New("http://127.0.0.1:1", ""),
 	})
 	return a.Handler(), nb, store, func() {
+		a.WaitForMessageTriggers()
 		srv.Close()
 		store.Close()
 	}

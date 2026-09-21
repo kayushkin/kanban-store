@@ -34,7 +34,21 @@ func (a *API) fireMessageTriggers(event *model.CardEvent) {
 	if event == nil || !model.IsMessageTriggerEventKind(event.Kind) {
 		return
 	}
-	go a.messages.FireTriggersFor(*event)
+	stored := *event
+	a.messageTriggersInFlight.Add(1)
+	go func() {
+		defer a.messageTriggersInFlight.Done()
+		a.messages.FireTriggersFor(stored)
+	}()
+}
+
+// WaitForMessageTriggers returns once every dispatch already started has
+// finished. The dispatch outlives the response that started it and reads the
+// store, so call this before closing the store: a dispatch still running then
+// fails with "database is closed", or re-creates SQLite's journal in a
+// directory that is being removed.
+func (a *API) WaitForMessageTriggers() {
+	a.messageTriggersInFlight.Wait()
 }
 
 func (a *API) boardMessageTriggers(w http.ResponseWriter, r *http.Request, boardID string) {

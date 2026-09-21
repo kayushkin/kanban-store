@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
@@ -37,6 +38,9 @@ type API struct {
 	// messages fires the board's message triggers after a card event is
 	// recorded. It has no sender until SetMessageSender is called.
 	messages *messaging.Dispatcher
+	// messageTriggersInFlight counts dispatches started by fireMessageTriggers
+	// that have not returned; WaitForMessageTriggers waits on it.
+	messageTriggersInFlight sync.WaitGroup
 	// principalEnforcement is nil unless SetPrincipalEnforcement was called;
 	// see principal_access.go.
 	principalEnforcement *PrincipalEnforcement

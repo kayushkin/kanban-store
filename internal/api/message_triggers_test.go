@@ -73,6 +73,9 @@ func setupWithMessageSender(t *testing.T, sender messaging.Sender) (http.Handler
 	t.Cleanup(func() { store.Close() })
 	nb := noteboard.New(notes.URL)
 	a := api.New(store, nb, principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL), settingsRegistryForTests(t))
+	// Cleanups run last-registered first, so this waits for trigger
+	// dispatches before the store above is closed.
+	t.Cleanup(a.WaitForMessageTriggers)
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New("http://127.0.0.1:1", "")})
 	if sender != nil {
 		a.SetMessageSender(sender)
