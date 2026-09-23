@@ -31,6 +31,8 @@ const (
 	// is one principal-store has retired.
 	requesterContact = "principal_000010"
 	disabledContact  = "principal_000011"
+	// organizationGroup is the one group the fake knows.
+	organizationGroup = "principal_000023"
 )
 
 func newFakePrincipalStore() *fakePrincipalStore {
@@ -43,6 +45,7 @@ func newFakePrincipalStore() *fakePrincipalStore {
 		deploymentAdministrator: 0,
 		requesterContact:        0,
 		disabledContact:         1_757_000_000,
+		organizationGroup:       0,
 	}}
 }
 
@@ -50,6 +53,9 @@ func newFakePrincipalStore() *fakePrincipalStore {
 func kindOf(id string) string {
 	if id == requesterContact || id == disabledContact {
 		return "contact"
+	}
+	if id == organizationGroup {
+		return "group"
 	}
 	return "human"
 }

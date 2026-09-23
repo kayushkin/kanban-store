@@ -478,3 +478,43 @@ func TestADefaultAssigneeDisabledSinceRefusesTheCardBeforeNoteboardIsTouched(t *
 		t.Fatalf("a refused card must not leave a noteboard item behind: %d → %d", itemsBefore, len(nb.items))
 	}
 }
+
+func TestTheClassifiersOrganizationMustBeAnActiveGroup(t *testing.T) {
+	principals := newFakePrincipalStore()
+	principalServer := httptest.NewServer(principals.handler())
+	defer principalServer.Close()
+	bridge := httptest.NewServer(newFakeLLMBridgeServer().handler())
+	defer bridge.Close()
+	bundles := httptest.NewServer(newFakeBundleStore().handler())
+	defer bundles.Close()
+	h, _, _, cleanup := setupWithOwners(t, principalServer.URL, bridge.URL, bundles.URL)
+	defer cleanup()
+	boardID := mkBoard(t, h, "Mail")
+	classifier := func(organizationID string) model.UpdateBoardRequest {
+		return model.UpdateBoardRequest{Classifier: &model.ClassifierConfig{Vocabulary: "personal", MailAccountIDs: []string{"gmail-personal"}, OrganizationID: organizationID}}
+	}
+	for _, refused := range []struct{ id, says string }{
+		{activePrincipal, "is a human"},
+		{requesterContact, "is a contact"},
+		{unknownPrincipal, "does not exist"},
+		{"org-7", "must match"},
+	} {
+		w := patchBoard(t, h, boardID, classifier(refused.id))
+		if w.Code != 400 || !strings.Contains(w.Body.String(), refused.says) || !strings.Contains(w.Body.String(), "classifier.organization_id") {
+			t.Errorf("%s: %d %s", refused.id, w.Code, w.Body.String())
+		}
+	}
+	if w := patchBoard(t, h, boardID, classifier(organizationGroup)); w.Code != 200 {
+		t.Fatalf("a group: %d %s", w.Code, w.Body.String())
+	}
+	w := do(t, h, "GET", "/api/boards/"+boardID, nil)
+	var board model.Board
+	decodeSuccessfulResponse(t, w, &board)
+	if board.Classifier == nil || board.Classifier.OrganizationID != organizationGroup {
+		t.Fatalf("read back %+v", board.Classifier)
+	}
+	principals.disabledAtByID[organizationGroup] = 1_757_000_000
+	if w := patchBoard(t, h, boardID, classifier(organizationGroup)); w.Code != 400 || !strings.Contains(w.Body.String(), "disabled") {
+		t.Fatalf("a disabled group: %d %s", w.Code, w.Body.String())
+	}
+}

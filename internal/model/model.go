@@ -73,6 +73,12 @@ type ClassifierConfig struct {
 	// discovering noteboard todos does not pick it up before the pipeline that
 	// owns the card releases it.
 	HoldNewCards bool `json:"hold_new_cards"`
+	// OrganizationID is the principal-store group (principal_…) the
+	// classifier's model calls are made for, as llm-bridge-server operations:
+	// their budget and their grants are that organization's. Checked with
+	// principal-store on write: it must be an active group. Empty until set;
+	// a classifier that runs through operations refuses a board without it.
+	OrganizationID string `json:"organization_id,omitempty"`
 }
 
 // Validate refuses a config that would send the classifier looking for nothing.
@@ -94,7 +100,7 @@ func (c *ClassifierConfig) Validate() error {
 // Cleared reports whether this is the present-but-empty object a PATCH sends to
 // remove the classifier, mirroring business_hours' empty tzid.
 func (c *ClassifierConfig) Cleared() bool {
-	return c.Vocabulary == "" && len(c.MailAccountIDs) == 0 && !c.HoldNewCards
+	return c.Vocabulary == "" && len(c.MailAccountIDs) == 0 && !c.HoldNewCards && c.OrganizationID == ""
 }
 
 // ClassificationTaxonomyCleared reports whether a taxonomy is the

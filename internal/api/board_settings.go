@@ -41,6 +41,11 @@ func (a *API) checkBoardSettings(req *model.UpdateBoardRequest) error {
 			return err
 		}
 	}
+	if req.Classifier != nil && req.Classifier.OrganizationID != "" {
+		if err := a.checkPrincipalIsActiveGroup("classifier.organization_id", req.Classifier.OrganizationID); err != nil {
+			return err
+		}
+	}
 	if req.DefaultAgentID != nil && *req.DefaultAgentID != "" {
 		if err := a.bridge.CheckAgentExists(*req.DefaultAgentID); err != nil {
 			if errors.Is(err, llmbridge.ErrNotFound) {
@@ -83,6 +88,29 @@ func (a *API) checkPrincipalIsAssignable(principalID string) error {
 	}
 	if principal.Disabled() {
 		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id %s is disabled in principal-store", principalID)}
+	}
+	return nil
+}
+
+// checkPrincipalIsActiveGroup asks principal-store whether id is a group
+// that is not disabled: an organization is a group, and a person or a
+// contact in its place would make every operation run as the wrong thing.
+func (a *API) checkPrincipalIsActiveGroup(field, principalID string) error {
+	if !principalIDShape.MatchString(principalID) {
+		return &settingsCheckFailure{400, fmt.Sprintf("%s must match ^%s$ (for example principal_000006), got %q", field, config.PrincipalIDPattern, principalID)}
+	}
+	principal, err := a.principals.Get(principalID)
+	if errors.Is(err, principalstore.ErrNotFound) {
+		return &settingsCheckFailure{400, fmt.Sprintf("%s %s does not exist in principal-store", field, principalID)}
+	}
+	if err != nil {
+		return &settingsCheckFailure{502, "principal-store check failed: " + err.Error()}
+	}
+	if principal.Kind != "group" {
+		return &settingsCheckFailure{400, fmt.Sprintf("%s %s is a %s; an organization is a principal-store group", field, principalID, principal.Kind)}
+	}
+	if principal.Disabled() {
+		return &settingsCheckFailure{400, fmt.Sprintf("%s %s is disabled in principal-store", field, principalID)}
 	}
 	return nil
 }
