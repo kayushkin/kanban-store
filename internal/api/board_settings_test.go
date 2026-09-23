@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kayushkin/kanban-store/internal/model"
+	"github.com/kayushkin/llm-bridge/msg"
 )
 
 // ============================ Stub llm-bridge-server ============================
@@ -251,6 +252,107 @@ func TestBoardSettingsRefuseAHalfClassifier(t *testing.T) {
 		if w.Code != 400 {
 			t.Fatalf("classifier %+v: want 400, got %d %s", cc, w.Code, w.Body.String())
 		}
+	}
+}
+
+// ============================ Classification taxonomy ============================
+
+func supportMailTaxonomy() *msg.ClassificationTaxonomy {
+	return &msg.ClassificationTaxonomy{
+		Name:   "support-mail",
+		Domain: "support mail to a logistics company",
+		Axes: []msg.ClassificationAxis{
+			{Name: "category", Required: true, Values: []msg.ClassificationValue{
+				{Name: "billing", Description: "invoices, refunds, payment failures"},
+				{Name: "delivery", Description: "late, lost or damaged shipments"},
+			}},
+			{Name: "urgency", AllowMultiple: false, Values: []msg.ClassificationValue{
+				{Name: "today"}, {Name: "this-week"},
+			}},
+		},
+	}
+}
+
+func TestBoardTaxonomyRoundTripsAndClears(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	boardID := mkBoard(t, h, "Taxonomy")
+
+	if w := patchBoard(t, h, boardID, model.UpdateBoardRequest{Taxonomy: supportMailTaxonomy()}); w.Code != 200 {
+		t.Fatalf("set taxonomy: %d %s", w.Code, w.Body.String())
+	}
+	b := getBoard(t, h, boardID)
+	if b.Taxonomy == nil {
+		t.Fatalf("taxonomy did not round-trip: %+v", b)
+	}
+	got, _ := json.Marshal(b.Taxonomy)
+	want, _ := json.Marshal(supportMailTaxonomy())
+	if string(got) != string(want) {
+		t.Fatalf("taxonomy did not round-trip:\n got  %s\n want %s", got, want)
+	}
+
+	// The board list carries it too.
+	var boards []model.Board
+	decodeSuccessfulResponse(t, do(t, h, "GET", "/api/boards", nil), &boards)
+	if len(boards) != 1 || boards[0].Taxonomy == nil || boards[0].Taxonomy.Name != "support-mail" {
+		t.Fatalf("list does not carry the taxonomy: %+v", boards)
+	}
+
+	// A PATCH that omits the field leaves the taxonomy alone, including one
+	// that changes the classifier beside it.
+	if w := patchBoard(t, h, boardID, model.UpdateBoardRequest{
+		Name:       str("Renamed"),
+		Classifier: &model.ClassifierConfig{Vocabulary: "work", MailAccountIDs: []string{"demo-work"}},
+	}); w.Code != 200 {
+		t.Fatalf("unrelated patch: %d %s", w.Code, w.Body.String())
+	}
+	if b := getBoard(t, h, boardID); b.Taxonomy == nil || len(b.Taxonomy.Axes) != 2 {
+		t.Fatalf("an unrelated PATCH changed the taxonomy: %+v", b.Taxonomy)
+	}
+
+	// An empty object clears it, and a cleared taxonomy is absent on the wire.
+	if w := patchBoard(t, h, boardID, model.UpdateBoardRequest{Taxonomy: &msg.ClassificationTaxonomy{}}); w.Code != 200 {
+		t.Fatalf("clear taxonomy: %d %s", w.Code, w.Body.String())
+	}
+	if b := getBoard(t, h, boardID); b.Taxonomy != nil || b.Classifier == nil {
+		t.Fatalf("clearing the taxonomy should leave only the classifier: %+v", b)
+	}
+	if raw := do(t, h, "GET", "/api/boards/"+boardID, nil).Body.String(); strings.Contains(raw, "taxonomy") {
+		t.Fatalf("cleared taxonomy still on the wire: %s", raw)
+	}
+}
+
+func TestBoardTaxonomyRefusesWhatTheValidatorRefuses(t *testing.T) {
+	h, _, cleanup := setup(t)
+	defer cleanup()
+	boardID := mkBoard(t, h, "Bad taxonomy")
+	if w := patchBoard(t, h, boardID, model.UpdateBoardRequest{Taxonomy: supportMailTaxonomy()}); w.Code != 200 {
+		t.Fatalf("set taxonomy: %d %s", w.Code, w.Body.String())
+	}
+
+	noAxes := &msg.ClassificationTaxonomy{Name: "named but empty"}
+	repeatedAxis := supportMailTaxonomy()
+	repeatedAxis.Axes[1].Name = "category"
+	domainOnly := &msg.ClassificationTaxonomy{Domain: "a domain alone is not a clear"}
+	for _, testCase := range []struct {
+		name             string
+		taxonomy         *msg.ClassificationTaxonomy
+		wantInTheRefusal string
+	}{
+		{"no axes", noAxes, "at least one axis"},
+		{"repeated axis name", repeatedAxis, `axis \"category\" appears twice`},
+		{"domain but no name", domainOnly, "taxonomy needs a name"},
+	} {
+		w := patchBoard(t, h, boardID, model.UpdateBoardRequest{Taxonomy: testCase.taxonomy})
+		if w.Code != 400 {
+			t.Fatalf("%s: want 400, got %d %s", testCase.name, w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), testCase.wantInTheRefusal) {
+			t.Fatalf("%s: the refusal should carry the validator's message %q: %s", testCase.name, testCase.wantInTheRefusal, w.Body.String())
+		}
+	}
+	if b := getBoard(t, h, boardID); b.Taxonomy == nil || b.Taxonomy.Name != "support-mail" || len(b.Taxonomy.Axes) != 2 {
+		t.Fatalf("a refused taxonomy was written: %+v", b.Taxonomy)
 	}
 }
 

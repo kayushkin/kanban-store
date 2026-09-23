@@ -139,7 +139,7 @@ the unit or a drop-in, and takes effect on restart.
 | `GET` | `/api/boards` | `?include_archived=true` to include archived boards |
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
-| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier` — see [Board settings](#board-settings) |
+| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier`, `taxonomy` — see [Board settings](#board-settings) |
 | `GET` `PUT` | `/api/boards/{id}/tag-rules` | The board's ordered tag rules — see [Tag rules](#tag-rules) |
 | `GET` | `/api/boards/{id}/effective-defaults?tag=…&tag=…` | What a card carrying these tags gets on this board, each default with its source |
 | `GET` | `/api/boards/{id}/cards/{card_id}/effective-defaults` | The same, with the card's tags read from noteboard |
@@ -637,10 +637,12 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
 | `classifier.vocabulary` | nobody here — email-classifier owns its vocabularies and refuses a board naming one it lacks (`email-classifier -list-vocabularies`) | email-classifier |
 | `classifier.mail_account_ids` | nobody here — mailstack is behind a token this store does not hold; the classifier checks them at run time. Explicit, never "every account" | email-classifier |
 | `classifier.hold_new_cards` | — | email-classifier |
+| `taxonomy` | nobody here — the value must pass llm-bridge's `msg.ClassificationTaxonomy.Validate` (a name, at least one axis, each axis with values, no blank or repeated names), or the PATCH is a 400 with the validator's message | llm-bridge-server's `classification.run`, when an operation names the board. Separate from `classifier`, which files mail and needs mail accounts |
 
 An owner that says the id does not exist is a **400** and an owner that could
 not be asked is a **502**; nothing is written on either. An empty string clears
-an id and `{"classifier":{}}` clears the classifier; a cleared setting is absent
+an id, `{"classifier":{}}` clears the classifier and `{"taxonomy":{}}` (no
+name, no domain, no axes) clears the taxonomy; a cleared setting is absent
 from the board on the wire, not an empty string. Omitting a field leaves it
 alone.
 

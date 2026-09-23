@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kayushkin/kanban-store/internal/model"
+	"github.com/kayushkin/llm-bridge/msg"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -193,14 +194,14 @@ func (s *Store) GetBoard(id string) (*model.Board, error) {
 // the business-hours figures absent rather than zero further down.
 // boardColumns is the one spelling of the boards row every read shares.
 const boardColumns = `id, name, description, archived, business_hours,
-	default_principal_id, default_agent_id, default_instance_id, default_bundle_id, classifier, created_at, updated_at`
+	default_principal_id, default_agent_id, default_instance_id, default_bundle_id, classifier, taxonomy, created_at, updated_at`
 
 func scanBoard(r scanner) (*model.Board, error) {
 	b := &model.Board{}
 	var arch int
-	var hours, defaultPrincipal, defaultAgent, defaultInstance, defaultBundle, classifier sql.NullString
+	var hours, defaultPrincipal, defaultAgent, defaultInstance, defaultBundle, classifier, taxonomy sql.NullString
 	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours,
-		&defaultPrincipal, &defaultAgent, &defaultInstance, &defaultBundle, &classifier, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		&defaultPrincipal, &defaultAgent, &defaultInstance, &defaultBundle, &classifier, &taxonomy, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	b.Archived = arch != 0
@@ -221,6 +222,13 @@ func scanBoard(r scanner) (*model.Board, error) {
 			return nil, fmt.Errorf("board %s has unreadable classifier: %w", b.ID, err)
 		}
 		b.Classifier = &cc
+	}
+	if taxonomy.Valid && strings.TrimSpace(taxonomy.String) != "" {
+		var classificationTaxonomy msg.ClassificationTaxonomy
+		if err := json.Unmarshal([]byte(taxonomy.String), &classificationTaxonomy); err != nil {
+			return nil, fmt.Errorf("board %s has unreadable taxonomy: %w", b.ID, err)
+		}
+		b.Taxonomy = &classificationTaxonomy
 	}
 	return b, nil
 }
@@ -299,6 +307,13 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 			b.Classifier = req.Classifier
 		}
 	}
+	if req.Taxonomy != nil {
+		if model.ClassificationTaxonomyCleared(req.Taxonomy) {
+			b.Taxonomy = nil
+		} else {
+			b.Taxonomy = req.Taxonomy
+		}
+	}
 	b.UpdatedAt = now()
 	arch := 0
 	if b.Archived {
@@ -320,11 +335,19 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		}
 		classifier = encoded
 	}
+	var taxonomy any
+	if b.Taxonomy != nil {
+		encoded, err := nullableJSON(b.Taxonomy)
+		if err != nil {
+			return nil, err
+		}
+		taxonomy = encoded
+	}
 	_, err = s.db.Exec(
 		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?,
-		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, updated_at=? WHERE id=?`,
+		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, taxonomy=?, updated_at=? WHERE id=?`,
 		b.Name, b.Description, arch, hours,
-		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier,
+		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier, taxonomy,
 		b.UpdatedAt, id,
 	)
 	return b, err

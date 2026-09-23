@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/llm-bridge/msg"
 )
 
 // Board is a kanban board. Each board defines its own ordered set of columns.
@@ -42,8 +44,15 @@ type Board struct {
 	// runs; this is only WHAT it runs with, so the board is the one place the
 	// answer lives instead of a flag on a cron job.
 	Classifier *ClassifierConfig `json:"classifier,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	// Taxonomy is what classification.run on llm-bridge-server reads when an
+	// operation names this board: the axes and values its items may be
+	// labelled with. It is separate from Classifier, which is
+	// email-classifier's mail-filing config and requires mail accounts; a
+	// board may have either, both or neither. Absent means the board has no
+	// taxonomy, and an operation naming it must bring its own or fail.
+	Taxonomy  *msg.ClassificationTaxonomy `json:"taxonomy,omitempty"`
+	CreatedAt time.Time                   `json:"created_at"`
+	UpdatedAt time.Time                   `json:"updated_at"`
 }
 
 // ClassifierConfig is what email-classifier reads off a board before filing
@@ -88,6 +97,14 @@ func (c *ClassifierConfig) Cleared() bool {
 	return c.Vocabulary == "" && len(c.MailAccountIDs) == 0 && !c.HoldNewCards
 }
 
+// ClassificationTaxonomyCleared reports whether a taxonomy is the
+// present-but-empty object a PATCH sends to remove the board's taxonomy: no
+// name, no domain and no axes. An object with only some of those set is not a
+// clear; it goes to Validate and is refused there.
+func ClassificationTaxonomyCleared(taxonomy *msg.ClassificationTaxonomy) bool {
+	return taxonomy.Name == "" && taxonomy.Domain == "" && len(taxonomy.Axes) == 0
+}
+
 type CreateBoardRequest struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`
@@ -117,6 +134,10 @@ type UpdateBoardRequest struct {
 	// Classifier replaces the board's classifier config. Sending an empty
 	// object clears it; omitting the field leaves it alone.
 	Classifier *ClassifierConfig `json:"classifier,omitempty"`
+	// Taxonomy replaces the board's classification taxonomy. Sending an object
+	// with no name, no domain and no axes clears it; omitting the field leaves
+	// it alone; anything else must pass the taxonomy's own Validate.
+	Taxonomy *msg.ClassificationTaxonomy `json:"taxonomy,omitempty"`
 }
 
 func (r *UpdateBoardRequest) Validate() error {
@@ -128,6 +149,11 @@ func (r *UpdateBoardRequest) Validate() error {
 	if r.Classifier != nil && !r.Classifier.Cleared() {
 		if err := r.Classifier.Validate(); err != nil {
 			return err
+		}
+	}
+	if r.Taxonomy != nil && !ClassificationTaxonomyCleared(r.Taxonomy) {
+		if err := r.Taxonomy.Validate(); err != nil {
+			return fmt.Errorf("taxonomy: %w", err)
 		}
 	}
 	for name, value := range map[string]*string{

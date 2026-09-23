@@ -7,6 +7,7 @@ is the source of truth; do not edit `model.ts` by hand. Regenerate with
 
 A card's `item` is a noteboard record passed through unchanged, so `CardView`
 and `EntityCardView` take that type from `@kayushkin/noteboard-types` instead
-of copying it.
+of copying it. A board's `taxonomy` is llm-bridge's `ClassificationTaxonomy`,
+taken the same way from `@kayushkin/llm-bridge-types`.
 
 Source-only for now: install with `file:../kanban-store/ts`.

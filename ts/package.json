@@ -13,7 +13,8 @@
   "files": ["model.ts", "README.md"],
   "dependencies": {
     "@kayushkin/noteboard-types": "file:../../noteboard/ts",
-    "@kayushkin/file-store-types": "file:../../file-store/ts"
+    "@kayushkin/file-store-types": "file:../../file-store/ts",
+    "@kayushkin/llm-bridge-types": "file:../../llm-bridge/ts"
   },
   "license": "Apache-2.0",
   "author": "kayushkin",
