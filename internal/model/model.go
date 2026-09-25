@@ -44,6 +44,11 @@ type Board struct {
 	// runs; this is only WHAT it runs with, so the board is the one place the
 	// answer lives instead of a flag on a cron job.
 	Classifier *ClassifierConfig `json:"classifier,omitempty"`
+	// AssignmentPool hands a card that arrives with no assignee to one member
+	// of a principal-store group who is available at that moment, by the
+	// members' own declared hours and time off. Absent means the board uses
+	// DefaultPrincipalID alone. See AssignmentPool.
+	AssignmentPool *AssignmentPool `json:"assignment_pool,omitempty"`
 	// Taxonomy is what classification.run on llm-bridge-server reads when an
 	// operation names this board: the axes and values its items may be
 	// labelled with. It is separate from Classifier, which is
@@ -103,6 +108,59 @@ func (c *ClassifierConfig) Cleared() bool {
 	return c.Vocabulary == "" && len(c.MailAccountIDs) == 0 && !c.HoldNewCards && c.OrganizationID == ""
 }
 
+// AssignmentStrategy is how a board's assignment pool chooses among the
+// members available when a card arrives. The set is served at
+// GET /api/assignment-strategies so no client keeps its own copy.
+type AssignmentStrategy string
+
+const (
+	// AssignmentStrategyLeastOpenCards picks the member assigned to the fewest
+	// cards on this board that sit in a column that does not stop the clock.
+	AssignmentStrategyLeastOpenCards AssignmentStrategy = "least_open_cards"
+	// AssignmentStrategyRoundRobin picks the member whose newest assignment on
+	// this board is the oldest; a member never assigned here comes first.
+	AssignmentStrategyRoundRobin AssignmentStrategy = "round_robin"
+)
+
+// AssignmentStrategies is the served vocabulary, in the order a picker shows it.
+var AssignmentStrategies = []AssignmentStrategy{AssignmentStrategyLeastOpenCards, AssignmentStrategyRoundRobin}
+
+// AssignmentPool is the board setting that hands a card arriving with no
+// assignee to someone who is working. PrincipalID names a principal-store
+// group; which of its members are available is principal-store's answer
+// (GET /principals/{group}/members?available_at=), built from each person's
+// own declared week and time off. kanban-store keeps no hours of its own.
+//
+// A tag rule that names a principal still wins: it is a per-card override,
+// and the pool is a board-wide default. When no member is available the card
+// takes DefaultPrincipalID if the board has one, else it arrives unassigned
+// and the log records an assignment_skipped event saying why.
+type AssignmentPool struct {
+	PrincipalID string             `json:"principal_id"`
+	Strategy    AssignmentStrategy `json:"strategy"`
+}
+
+// Cleared reports whether this is the present-but-empty object a PATCH sends
+// to remove the pool, mirroring the classifier's clear.
+func (p *AssignmentPool) Cleared() bool {
+	return p.PrincipalID == "" && p.Strategy == ""
+}
+
+// Validate checks what can be judged without principal-store: the id's shape
+// is checked by the API with the owner, and a strategy must be one this store
+// knows how to run.
+func (p *AssignmentPool) Validate() error {
+	if p.PrincipalID == "" {
+		return fmt.Errorf("assignment_pool.principal_id is required: a principal-store group")
+	}
+	for _, known := range AssignmentStrategies {
+		if p.Strategy == known {
+			return nil
+		}
+	}
+	return fmt.Errorf("assignment_pool.strategy %q is not one of %v (GET /api/assignment-strategies)", p.Strategy, AssignmentStrategies)
+}
+
 // ClassificationTaxonomyCleared reports whether a taxonomy is the
 // present-but-empty object a PATCH sends to remove the board's taxonomy: no
 // name, no domain and no axes. An object with only some of those set is not a
@@ -140,6 +198,10 @@ type UpdateBoardRequest struct {
 	// Classifier replaces the board's classifier config. Sending an empty
 	// object clears it; omitting the field leaves it alone.
 	Classifier *ClassifierConfig `json:"classifier,omitempty"`
+	// AssignmentPool replaces the board's assignment pool. Sending an empty
+	// object clears it; omitting the field leaves it alone. The API checks
+	// with principal-store that the principal is an active group.
+	AssignmentPool *AssignmentPool `json:"assignment_pool,omitempty"`
 	// Taxonomy replaces the board's classification taxonomy. Sending an object
 	// with no name, no domain and no axes clears it; omitting the field leaves
 	// it alone; anything else must pass the taxonomy's own Validate.
@@ -154,6 +216,11 @@ func (r *UpdateBoardRequest) Validate() error {
 	}
 	if r.Classifier != nil && !r.Classifier.Cleared() {
 		if err := r.Classifier.Validate(); err != nil {
+			return err
+		}
+	}
+	if r.AssignmentPool != nil && !r.AssignmentPool.Cleared() {
+		if err := r.AssignmentPool.Validate(); err != nil {
 			return err
 		}
 	}

@@ -78,6 +78,12 @@ const (
 	// runnable, so the event carries whatever state the card was already in.
 	EventAssigned   EventKind = "assigned"
 	EventUnassigned EventKind = "unassigned"
+	// EventAssignmentSkipped is a card arriving on a board with an assignment
+	// pool and being left unassigned: nobody in the pool was available and the
+	// board has no default principal. Its detail says why, so the board shows
+	// the reason instead of a card that looks forgotten. No clock state of its
+	// own, like EventAssigned.
+	EventAssignmentSkipped EventKind = "assignment_skipped"
 )
 
 // defaultClockStateByEventKind is what each action means for the clock when the

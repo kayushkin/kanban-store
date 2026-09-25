@@ -20,6 +20,13 @@ import (
 type fakePrincipalStore struct {
 	disabledAtByID map[string]int64
 	requests       atomic.Int64
+	// availableMembersByGroup is what GET /principals/{group}/members?available_at=
+	// answers: the members principal-store would call available. Which hours
+	// and time off made them so is principal-store's business, not this fake's.
+	availableMembersByGroup map[string][]string
+	// membersStatus, when set, is the status the members route answers with
+	// instead, to stand in for a principal-store that cannot say.
+	membersStatus int
 }
 
 const (
@@ -31,8 +38,9 @@ const (
 	// is one principal-store has retired.
 	requesterContact = "principal_000010"
 	disabledContact  = "principal_000011"
-	// organizationGroup is the one group the fake knows.
+	// organizationGroup and poolGroup are the groups the fake knows.
 	organizationGroup = "principal_000023"
+	poolGroup         = "principal_000030"
 )
 
 func newFakePrincipalStore() *fakePrincipalStore {
@@ -46,7 +54,8 @@ func newFakePrincipalStore() *fakePrincipalStore {
 		requesterContact:        0,
 		disabledContact:         1_757_000_000,
 		organizationGroup:       0,
-	}}
+		poolGroup:               0,
+	}, availableMembersByGroup: map[string][]string{}}
 }
 
 // kindOf answers what fakePrincipalStore says a principal is.
@@ -54,7 +63,7 @@ func kindOf(id string) string {
 	if id == requesterContact || id == disabledContact {
 		return "contact"
 	}
-	if id == organizationGroup {
+	if id == organizationGroup || id == poolGroup {
 		return "group"
 	}
 	return "human"
@@ -74,6 +83,27 @@ func (f *fakePrincipalStore) handler() http.Handler {
 			"id": id, "kind": kindOf(id), "display_name": "Test Person", "email": "test@example.com",
 			"disabled_at": disabledAt, "is_administrator": id == deploymentAdministrator,
 		})
+	})
+	mux.HandleFunc("GET /principals/{id}/members", func(w http.ResponseWriter, r *http.Request) {
+		f.requests.Add(1)
+		if f.membersStatus != 0 {
+			writeJSON(w, f.membersStatus, map[string]string{"error": "principal-store is having a bad day"})
+			return
+		}
+		if r.URL.Query().Get("available_at") == "" {
+			writeJSON(w, 400, map[string]string{"error": "this fake answers only the available_at question"})
+			return
+		}
+		id := r.PathValue("id")
+		if _, ok := f.disabledAtByID[id]; !ok {
+			writeJSON(w, 404, map[string]string{"error": "principal not found"})
+			return
+		}
+		members := []map[string]any{}
+		for _, member := range f.availableMembersByGroup[id] {
+			members = append(members, map[string]any{"id": member, "kind": kindOf(member), "display_name": "Member", "disabled_at": 0})
+		}
+		writeJSON(w, 200, members)
 	})
 	return mux
 }

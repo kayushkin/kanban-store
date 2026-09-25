@@ -139,7 +139,7 @@ the unit or a drop-in, and takes effect on restart.
 | `GET` | `/api/boards` | `?include_archived=true` to include archived boards |
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
-| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier`, `taxonomy` — see [Board settings](#board-settings) |
+| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier`, `assignment_pool`, `taxonomy` — see [Board settings](#board-settings) |
 | `GET` `PUT` | `/api/boards/{id}/tag-rules` | The board's ordered tag rules — see [Tag rules](#tag-rules) |
 | `GET` | `/api/boards/{id}/effective-defaults?tag=…&tag=…` | What a card carrying these tags gets on this board, each default with its source |
 | `GET` | `/api/boards/{id}/cards/{card_id}/effective-defaults` | The same, with the card's tags read from noteboard |
@@ -441,6 +441,7 @@ session `p0`, a machine `lab`.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…}]` |
+| `GET` | `/api/assignment-strategies` | How a board's `assignment_pool` may choose: `["least_open_cards","round_robin"]` |
 | `GET` | `/api/search?q=…` | Full-text, delegated to noteboard; `&limit=`, `&board_id=`, `&on_board=true` |
 
 `/api/entity-types` is how a client discovers where to resolve a ref it finds in
@@ -492,7 +493,7 @@ pauses it (`card_held`, `waiting_started`); only finishing stops it
 (`card_completed`, `card_detached`). A move takes its state from the destination
 column, because that is where a column's classification is for.
 
-`assigned` and `unassigned` say who is on the card, not whether the work is
+`assigned`, `unassigned` and `assignment_skipped` say who is on the card, not whether the work is
 runnable, so they carry the clock forward unchanged: each is recorded with the
 state the card is already in, and a paused card stays paused and a finished card
 stays finished through either. "Already in" means the card's most recent action
@@ -637,11 +638,14 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
 | `classifier.vocabulary` | nobody here — email-classifier owns its vocabularies and refuses a board naming one it lacks (`email-classifier -list-vocabularies`) | email-classifier |
 | `classifier.mail_account_ids` | nobody here — mailstack is behind a token this store does not hold; the classifier checks them at run time. Explicit, never "every account" | email-classifier |
 | `classifier.hold_new_cards` | — | email-classifier |
+| `assignment_pool.principal_id` | principal-store — must be a group and not disabled | kanban-store itself, see below |
+| `assignment_pool.strategy` | nobody here — one of `GET /api/assignment-strategies`, else a 400 | kanban-store itself |
 | `taxonomy` | nobody here — the value must pass llm-bridge's `msg.ClassificationTaxonomy.Validate` (a name, at least one axis, each axis with values, no blank or repeated names), or the PATCH is a 400 with the validator's message | llm-bridge-server's `classification.run`, when an operation names the board. Separate from `classifier`, which files mail and needs mail accounts |
 
 An owner that says the id does not exist is a **400** and an owner that could
 not be asked is a **502**; nothing is written on either. An empty string clears
-an id, `{"classifier":{}}` clears the classifier and `{"taxonomy":{}}` (no
+an id, `{"classifier":{}}` clears the classifier, `{"assignment_pool":{}}`
+clears the pool and `{"taxonomy":{}}` (no
 name, no domain, no axes) clears the taxonomy; a cleared setting is absent
 from the board on the wire, not an empty string. Omitting a field leaves it
 alone.
@@ -656,6 +660,33 @@ principal-store on every application, before the noteboard item is created, so
 a person disabled since the setting was made refuses the card with a 400 that
 names `default_principal_id` rather than filing new work to someone who has
 left.
+
+**An assignment pool hands new work to someone who is working.** With
+`"assignment_pool":{"principal_id":"principal_000030","strategy":"least_open_cards"}`,
+a card that arrives with no assignee is decided in this order:
+
+1. A tag rule that names a principal wins — it is a per-card override.
+2. Otherwise kanban-store asks principal-store which members of the group are
+   available now (`GET /principals/{group}/members?available_at=`). Availability
+   is each person's own declared week and time off, kept in principal-store;
+   this store keeps no hours. One member is chosen by the strategy and the
+   `assigned` event's detail says `"source":"pool"`, the strategy, the pool and
+   how many `candidates` there were.
+   - `least_open_cards` — fewest assignments on this board's cards that sit in
+     a column that does not stop the clock (`budget_clock_state` other than
+     `stopped`); ties go the round-robin way.
+   - `round_robin` — the member whose newest assignment on this board is
+     oldest; someone never assigned here first.
+   - A tie that remains goes to the lower principal id.
+3. Nobody available: the board's `default_principal_id`, with
+   `"source":"board_default","pool_empty":true` in the detail.
+4. Nobody available and no default: the card arrives unassigned and the log
+   gets an `assignment_skipped` event on the board with
+   `{"reason":"pool_empty","pool_principal_id":…}`, so the board can show why.
+
+A principal-store that cannot say who is available is a **502** and the card is
+not created, the same as for the default principal. Without a pool, nothing
+above changes.
 
 ### Message triggers
 

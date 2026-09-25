@@ -326,7 +326,8 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 		return &accessRefusal{status: http.StatusForbidden, message: "settings are read with " + ServiceTokenHeader + " or by an administrator"}, nil
 
 	case path == "/api/entity-types", path == "/api/message-trigger-options",
-		path == "/api/ticket-channels", path == "/api/ticket-lifecycle-states", path == "/api/note-visibilities":
+		path == "/api/ticket-channels", path == "/api/ticket-lifecycle-states", path == "/api/note-visibilities",
+		path == "/api/assignment-strategies":
 		// Vocabularies: what a channel or a lifecycle state may be. They name
 		// no board and hold no card content.
 		return nil, nil

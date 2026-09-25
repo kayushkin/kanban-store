@@ -115,6 +115,9 @@ func (a *API) routes() *http.ServeMux {
 	// note vocabulary: who a note may be written for
 	mux.HandleFunc("/api/note-visibilities", a.noteVisibilities)
 
+	// assignment pool vocabulary: how a board's pool chooses among its members
+	mux.HandleFunc("/api/assignment-strategies", a.assignmentStrategies)
+
 	// entity-type registry & cross-entity tag listing
 	mux.HandleFunc("/api/entity-types", a.entityTypes)
 	mux.HandleFunc("/api/tags", a.allTags)
@@ -549,7 +552,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 409, err.Error())
 			return
 		}
-		defaultAssignee, err := a.defaultAssigneeOnArrival(boardID, cardTags)
+		arrivalAssignee, err := a.assigneeOnArrival(boardID, cardTags)
 		if err != nil {
 			writeSettingsCheckFailure(w, err)
 			return
@@ -567,7 +570,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 			writeError(w, 500, err.Error())
 			return
 		}
-		if _, err := a.applyDefaultAssignee(cardID, defaultAssignee, actorFrom(r)); err != nil {
+		if _, err := a.applyAssigneeOnArrival(cardID, boardID, arrivalAssignee, actorFrom(r)); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
@@ -619,7 +622,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 409, err.Error())
 		return
 	}
-	defaultAssignee, err := a.defaultAssigneeOnArrival(boardID, req.Tags)
+	arrivalAssignee, err := a.assigneeOnArrival(boardID, req.Tags)
 	if err != nil {
 		writeSettingsCheckFailure(w, err)
 		return
@@ -701,7 +704,7 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
-	assignments, err := a.applyDefaultAssignee(cardID, defaultAssignee, actorFrom(r))
+	assignments, err := a.applyAssigneeOnArrival(cardID, boardID, arrivalAssignee, actorFrom(r))
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

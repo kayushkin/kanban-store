@@ -1,7 +1,8 @@
 // Package principalstore is kanban-store's client for principal-store, the
-// registry that owns who a principal is. It exists for exactly one call:
-// checking, before a card assignment is written, that the principal being
-// assigned exists and is not disabled.
+// registry that owns who a principal is. It exists for two questions asked
+// before a card assignment is written: whether the principal being assigned
+// exists and is not disabled, and, for a board with an assignment pool, which
+// members of the pool's group are available right now.
 //
 // kanban-store is otherwise deliberately dumb. It never resolves a card link's
 // entity_ref, never proxies to the service an entity belongs to, and publishes
@@ -23,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -101,4 +103,34 @@ func (c *Client) Get(id string) (*Principal, error) {
 		return nil, fmt.Errorf("principal-store GET %s: undecodable body: %w", req.URL.Path, err)
 	}
 	return &p, nil
+}
+
+// ListAvailableMembers asks principal-store which active members of a group
+// are available at the instant given, by each member's own declared week and
+// time off (GET /principals/{group}/members?available_at=). An empty list is
+// an answer — nobody is working — not an error. Any status other than 200 is
+// an error naming it, so a board's pool never reads a failed call as an
+// empty pool.
+func (c *Client) ListAvailableMembers(groupID string, at time.Time) ([]Principal, error) {
+	req, err := http.NewRequest(http.MethodGet, c.BaseURL+"/principals/"+url.PathEscape(groupID)+"/members?available_at="+strconv.FormatInt(at.Unix(), 10), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("principal-store GET %s: %s — %s", req.URL.Path, resp.Status, strings.TrimSpace(string(body)))
+	}
+	var members []Principal
+	if err := json.NewDecoder(resp.Body).Decode(&members); err != nil {
+		return nil, fmt.Errorf("principal-store GET %s: undecodable body: %w", req.URL.Path, err)
+	}
+	return members, nil
 }
