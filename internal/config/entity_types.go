@@ -67,6 +67,14 @@ var EntityTypes = []model.EntityTypeInfo{
 	},
 
 	{
+		Type: "article", Service: "article-store", Search: "/articles?q=",
+		Get: "/articles/{id}",
+		// Same design as prediction: article-store mints article_000001, so
+		// the pattern claims no uuid and no bare number.
+		IDPatterns: []string{`article_\d{6,}`},
+	},
+
+	{
 		Type: "principal", Service: "principal-store", Search: "/principals?q=",
 		Get: "/principals/{id}",
 		// Same design as prediction: principal-store mints principal_000001

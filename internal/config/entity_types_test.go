@@ -56,6 +56,8 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"br_123", map[string]bool{"session": false}},                           // snowflake too short
 		{"principal_000001", map[string]bool{"principal": true, "prediction": false, "note": false}},
 		{"prediction_000001", map[string]bool{"prediction": true, "principal": false}},
+		{"article_000001", map[string]bool{"article": true, "prediction": false, "note": false}},
+		{"article_12", map[string]bool{"article": false}},      // fewer than six digits
 		{"principal_123", map[string]bool{"principal": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
 	}
