@@ -62,8 +62,8 @@ func TestListCardsByEntityIsOldestLinkFirst(t *testing.T) {
 		t.Fatalf("got %d cards, want %d: %v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("order = %v, want %v", got, want)
+		if got[i].CardID != want[i] {
+			t.Fatalf("order = %+v, want %v", got, want)
 		}
 	}
 }

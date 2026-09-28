@@ -2,7 +2,7 @@
 
 ## What it owns
 
-`:8305`. Board and card *placement*, treating **noteboard as the source of truth for card content** — it stores where a card sits, not what it says. Publishes an entity-type registry so agents can resolve entity refs themselves; deliberately dumb, it does not proxy to those services. README is the route table.
+`:8305`. Board and card *placement*, treating **noteboard as the source of truth for card content** — it stores where a card sits, not what it says. Publishes an entity-type registry so agents can resolve entity refs themselves; deliberately dumb, it does not proxy to those services. README is the route table. **Boards are views, not containers**: a column's `work_state` maps it onto one shared vocabulary (`GET /api/work-states`: not_started, working, waiting, done, dropped), and a card's shared state is the `work_state` of the column it last moved into on any board (`model.SharedWorkState`, README "Shared work states"). It is read-only and separate from `auto_status`, which writes noteboard's status.
 
 ## Where this prompt lives
 

@@ -43,6 +43,9 @@ type fakeNoteboard struct {
 	// queries counts POST /api/items/query calls, so a test can tell a read
 	// that asked noteboard to filter from one that had no need to.
 	queries int
+	// itemReads counts GET /api/items/{id} calls, so a test can tell a read
+	// that fetched items one by one from one that asked once.
+	itemReads int
 	// versions counts writes. An item's updated_at is its version, and the ids
 	// above must not move when a PATCH takes one.
 	versions int
@@ -107,6 +110,7 @@ func (f *fakeNoteboard) handler() http.Handler {
 		id := r.PathValue("id")
 		includeDeleted := r.URL.Query().Get("include_deleted") == "true"
 		f.mu.Lock()
+		f.itemReads++
 		it, ok := f.items[id]
 		if ok && !includeDeleted {
 			// A deleted item is not found unless asked for by name.

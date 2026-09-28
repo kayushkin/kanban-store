@@ -56,6 +56,10 @@ func New(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateWorkStates(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -412,6 +416,7 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 		AutoStatus:       req.AutoStatus,
 		BudgetClockState: req.BudgetClockState,
 		LifecycleState:   lifecycleStateFromRequest(req.LifecycleState),
+		WorkState:        workStateFromRequest(req.WorkState),
 		CreatedAt:        now(),
 		UpdatedAt:        now(),
 	}
@@ -419,10 +424,10 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 		c.Color = *req.Color
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO columns (id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, work_state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.BoardID, c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState),
-		lifecycleStateValue(c.LifecycleState), c.CreatedAt, c.UpdatedAt,
+		lifecycleStateValue(c.LifecycleState), workStateValue(c.WorkState), c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -432,7 +437,7 @@ func (s *Store) CreateColumn(boardID string, req *model.CreateColumnRequest) (*m
 
 func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 	rows, err := s.db.Query(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, work_state, created_at, updated_at
 		 FROM columns WHERE board_id = ? ORDER BY position ASC`, boardID,
 	)
 	if err != nil {
@@ -452,7 +457,7 @@ func (s *Store) ListColumns(boardID string) ([]*model.Column, error) {
 
 func (s *Store) GetColumn(id string) (*model.Column, error) {
 	row := s.db.QueryRow(
-		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, created_at, updated_at
+		`SELECT id, board_id, name, position, color, wip_limit, auto_status, budget_clock_state, lifecycle_state, work_state, created_at, updated_at
 		 FROM columns WHERE id = ?`, id,
 	)
 	c, err := scanColumn(row)
@@ -469,9 +474,13 @@ type scanner interface {
 func scanColumn(r scanner) (*model.Column, error) {
 	c := &model.Column{}
 	var wip sql.NullInt64
-	var auto, clock, lifecycle sql.NullString
-	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &clock, &lifecycle, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	var auto, clock, lifecycle, work sql.NullString
+	if err := r.Scan(&c.ID, &c.BoardID, &c.Name, &c.Position, &c.Color, &wip, &auto, &clock, &lifecycle, &work, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if work.Valid && work.String != "" {
+		state := model.WorkState(work.String)
+		c.WorkState = &state
 	}
 	if lifecycle.Valid && lifecycle.String != "" {
 		state := model.TicketLifecycleState(lifecycle.String)
@@ -526,11 +535,16 @@ func (s *Store) UpdateColumn(id string, req *model.UpdateColumnRequest) (*model.
 		// reports no lifecycle rather than a stale one.
 		c.LifecycleState = lifecycleStateFromRequest(req.LifecycleState)
 	}
+	if req.WorkState != nil {
+		// An empty string clears it, and a card whose latest move was into
+		// this column then reports no work_state rather than a stale one.
+		c.WorkState = workStateFromRequest(req.WorkState)
+	}
 	c.UpdatedAt = now()
 	_, err = s.db.Exec(
-		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, budget_clock_state=?, lifecycle_state=?, updated_at=? WHERE id=?`,
+		`UPDATE columns SET name=?, position=?, color=?, wip_limit=?, auto_status=?, budget_clock_state=?, lifecycle_state=?, work_state=?, updated_at=? WHERE id=?`,
 		c.Name, c.Position, c.Color, c.WIPLimit, c.AutoStatus, clockStateValue(c.BudgetClockState),
-		lifecycleStateValue(c.LifecycleState), c.UpdatedAt, id,
+		lifecycleStateValue(c.LifecycleState), workStateValue(c.WorkState), c.UpdatedAt, id,
 	)
 	return c, err
 }
@@ -750,37 +764,6 @@ func (s *Store) DeleteCardLink(linkID string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-// ListCardsByEntity returns all card_ids linked to a given entity. Caller
-// joins these with placements / noteboard for full views.
-// ListCardsByEntity returns the cards linked to one entity, oldest link
-// first. The order is part of the answer, not a detail: a caller that has to
-// pick a single card out of several — "which todo is this session for?" —
-// gets the link that was made first, which is the one made before the entity
-// did anything. Without an ORDER BY, SQLite picks, and that caller silently
-// picks a different card as rows move around.
-//
-// Ties break on card_id so the order is total.
-func (s *Store) ListCardsByEntity(entityType, entityRef string) ([]string, error) {
-	rows, err := s.db.Query(
-		`SELECT card_id FROM card_links WHERE entity_type=? AND entity_ref=?
-		 GROUP BY card_id ORDER BY MIN(created_at), card_id`,
-		entityType, entityRef,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
 }
 
 // ============================ Card assignments ============================

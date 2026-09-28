@@ -457,6 +457,12 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		return
 	}
 
+	workStatesByCard, err := a.cardWorkStatesForCaller(ids, principalBoardAccessFrom(r))
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
 	asOf := time.Now().UTC()
 	cards := make([]model.CardView, 0, len(placements))
 	for i, p := range placements {
@@ -470,6 +476,7 @@ func (a *API) columnCards(w http.ResponseWriter, r *http.Request, columnID strin
 		cards = append(cards, model.CardView{
 			Placement: p, Item: items[i], Links: linksByCard[p.CardID],
 			Assignments: assignmentsByCard[p.CardID], Ticket: ticketsByCard[p.CardID], Time: summary,
+			WorkState: workStatesByCard[p.CardID].State, WorkStateSource: workStatesByCard[p.CardID].Source,
 		})
 	}
 	writeJSON(w, 200, model.ColumnView{Column: col, Cards: cards, Total: total})

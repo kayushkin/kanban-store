@@ -9,6 +9,9 @@
 packages:
   - path: "github.com/kayushkin/kanban-store/internal/model"
     output_path: "ts/model.ts"
+    # The shared work_state rule's input type, never on the wire.
+    exclude_files:
+      - "work_state_selection.go"
     frontmatter: |
       import type { Item as NoteboardItem } from "@kayushkin/noteboard-types";
       import type { File as FileStoreFile } from "@kayushkin/file-store-types";

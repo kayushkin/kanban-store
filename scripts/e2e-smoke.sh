@@ -222,14 +222,21 @@ CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Doing","position":2,"w
 expect 201 "$CODE" "POST column Doing"
 DOING_COL="$(jget '.id')"; assert_eq 5 "$(jget '.wip_limit')" "column Doing wip_limit"
 
-CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Done","position":3,"auto_status":"done"}')
+CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Done","position":3,"auto_status":"done","work_state":"done"}')
 expect 201 "$CODE" "POST column Done"
 DONE_COL="$(jget '.id')"; assert_eq done "$(jget '.auto_status')" "column Done auto_status"
+assert_eq done "$(jget '.work_state')" "column Done work_state"
 
 CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Blocked","position":4,"wip_limit":0}')
 expect 201 "$CODE" "POST column Blocked"
 BLOCKED_COL="$(jget '.id')"
 echo "    todo=$TODO_COL doing=$DOING_COL done=$DONE_COL blocked=$BLOCKED_COL"
+
+step "GET /api/work-states — the shared vocabulary; a column outside it is a 400"
+CODE=$(req GET /api/work-states); expect 200 "$CODE" "GET work-states"
+assert_eq "not_started working waiting done dropped" "$(jq -r '[.[].work_state] | join(" ")' "$BODY")" "work-state vocabulary"
+CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Bogus","work_state":"blocked"}')
+expect 400 "$CODE" "POST column with work_state outside the vocabulary"
 
 step "POST /api/boards/:id/columns — reject an invalid auto_status"
 CODE=$(req POST "/api/boards/$BOARD_ID/columns" '{"name":"Bogus","auto_status":"finished"}')
@@ -362,7 +369,8 @@ stop_server
 # ============================================================================
 step "start stub noteboard on :$NB_PORT"
 # In-memory stand-in implementing ONLY the endpoints internal/noteboard/client.go
-# calls: POST/GET/PATCH/DELETE /api/items[/:id] and GET /api/search. Threading
+# calls: POST/GET/PATCH/DELETE /api/items[/:id], GET /api/search, and
+# POST /api/items/query without filters or sort (the entity reverse lookup). Threading
 # because GetItems fans out concurrent GETs. The real noteboard (:8191) is never
 # touched.
 cat >"$TMP_DIR/noteboard-stub.py" <<'PYEOF'
@@ -397,6 +405,15 @@ class Handler(BaseHTTPRequestHandler):
         return unquote(path[len(prefix):]) if path.startswith(prefix) else None
 
     def do_POST(self):
+        if urlparse(self.path).path == "/api/items/query":
+            q = self._read()
+            with LOCK:
+                found = [ITEMS[i] for i in q.get("ids", []) if i in ITEMS]
+                missing = [i for i in q.get("ids", []) if i not in ITEMS]
+            answer = {"total": len(found), "ids": [i["id"] for i in found], "missing_ids": missing}
+            if q.get("include_items"):
+                answer["items"] = found
+            return self._send(200, answer)
         if urlparse(self.path).path != "/api/items":
             return self._send(404, {"error": "not found"})
         p = self._read()
@@ -523,6 +540,8 @@ CODE=$(req GET /api/entities/session/e2e-session-1/cards); expect 200 "$CODE" "G
 assert_eq "$CARD_TITLE" \
   "$(jget ".[] | select(.card_id==\"$CARD_ID\") | .item.title")" \
   "entity reverse-lookup returned the card's noteboard content"
+assert_eq done "$(jget ".[] | select(.card_id==\"$CARD_ID\") | .work_state")" \
+  "entity reverse-lookup carries the card's shared work_state (last moved into Done)"
 # The phase-A link points at a card id that has no noteboard item — it must come
 # back as a null item (orphan), not blow up the whole response.
 assert_eq null "$(jget ".[] | select(.card_id==\"$LINK_CARD\") | .item")" \

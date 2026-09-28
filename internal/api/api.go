@@ -115,6 +115,9 @@ func (a *API) routes() *http.ServeMux {
 	// note vocabulary: who a note may be written for
 	mux.HandleFunc("/api/note-visibilities", a.noteVisibilities)
 
+	// work-state vocabulary: the states every board's columns map onto
+	mux.HandleFunc("/api/work-states", a.workStates)
+
 	// assignment pool vocabulary: how a board's pool chooses among its members
 	mux.HandleFunc("/api/assignment-strategies", a.assignmentStrategies)
 
@@ -513,7 +516,7 @@ func (a *API) boardCards(w http.ResponseWriter, r *http.Request, boardID string)
 			writeError(w, 400, err.Error())
 			return
 		}
-		view, err := a.assembleBoardView(boardID, limit, filter, content)
+		view, err := a.assembleBoardView(boardID, limit, filter, content, principalBoardAccessFrom(r))
 		if err != nil {
 			if content.isEmpty() {
 				mapDBErr(w, err)
@@ -716,8 +719,14 @@ func (a *API) createCardOnBoard(w http.ResponseWriter, r *http.Request, boardID 
 		writeError(w, 500, err.Error())
 		return
 	}
+	workStates, err := a.cardWorkStatesForCaller([]string{cardID}, principalBoardAccessFrom(r))
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	writeJSON(w, 201, model.CardView{
 		Placement: p, Item: item, Assignments: assignments,
+		WorkState: workStates[cardID].State, WorkStateSource: workStates[cardID].Source,
 		AutoStatusApplied: autoStatusApplied, AutoStatusError: autoStatusError,
 	})
 }
@@ -1005,6 +1014,12 @@ func (a *API) cardDetail(w http.ResponseWriter, r *http.Request, cardID string) 
 			detail.Placements = append(detail.Placements, placement)
 		}
 	}
+	workStates, err := a.cardWorkStatesForCaller([]string{cardID}, access)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	detail.WorkState, detail.WorkStateSource = workStates[cardID].State, workStates[cardID].Source
 	if detail.Links, err = a.store.ListCardLinks(cardID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -1210,36 +1225,7 @@ func (a *API) entityScoped(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 405, "method not allowed")
 			return
 		}
-		ids, err := a.store.ListCardsByEntity(etype, eref)
-		if err != nil {
-			writeError(w, 500, err.Error())
-			return
-		}
-		if access := principalBoardAccessFrom(r); access != nil {
-			visibleIDs := ids[:0]
-			for _, id := range ids {
-				visible, err := a.cardVisibleTo(access, id)
-				if err != nil {
-					writeError(w, 500, err.Error())
-					return
-				}
-				if visible {
-					visibleIDs = append(visibleIDs, id)
-				}
-			}
-			ids = visibleIDs
-		}
-		items, err := a.noteboard.GetItems(ids)
-		if err != nil {
-			writeError(w, 502, err.Error())
-			return
-		}
-		// Return parallel id/item arrays so callers can spot orphans (item==null).
-		out := make([]model.EntityCardView, len(ids))
-		for i, id := range ids {
-			out[i] = model.EntityCardView{CardID: id, Item: items[i]}
-		}
-		writeJSON(w, 200, out)
+		a.entityCards(w, r, etype, eref)
 	case "tags":
 		if len(parts) == 4 {
 			a.entityTagOne(w, r, etype, eref, parts[3])
@@ -1435,7 +1421,7 @@ func cardFilterFromQuery(r *http.Request) (db.CardFilter, error) {
 	return filter, nil
 }
 
-func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter, content cardContentQuery) (*model.BoardView, error) {
+func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter, content cardContentQuery, access *PrincipalBoardAccess) (*model.BoardView, error) {
 	b, err := a.store.GetBoard(boardID)
 	if err != nil {
 		return nil, err
@@ -1484,6 +1470,12 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 	if err != nil {
 		return nil, err
 	}
+	// A card's shared state can come from another board, so this reads every
+	// placement of the cards on screen — still one query.
+	workStatesByCard, err := a.cardWorkStatesForCaller(ids, access)
+	if err != nil {
+		return nil, err
+	}
 	ladder, err := a.store.GetPriorityLadder(boardID)
 	if err != nil {
 		return nil, err
@@ -1496,7 +1488,8 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 	for i, p := range placements {
 		cv := model.CardView{
 			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Assignments: assignmentsByCard[p.CardID],
-			Ticket: ticketsByCard[p.CardID],
+			Ticket:    ticketsByCard[p.CardID],
+			WorkState: workStatesByCard[p.CardID].State, WorkStateSource: workStatesByCard[p.CardID].Source,
 		}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
 			Events: eventsByCard[p.CardID],

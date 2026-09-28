@@ -165,7 +165,7 @@ See [Board classification](#board-classification) for what these mean.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/boards/{id}/columns` | In `position` order |
-| `POST` | `/api/boards/{id}/columns` | `{"name":…,"position":…,"color":…,"wip_limit":…,"auto_status":…}` |
+| `POST` | `/api/boards/{id}/columns` | `{"name":…,"position":…,"color":…,"wip_limit":…,"auto_status":…,"budget_clock_state":…,"lifecycle_state":…,"work_state":…}` |
 | `POST` | `/api/boards/{id}/columns/reorder` | `{"columns":[{"id":…,"position":…}]}`; returns the reordered set |
 | `GET` `PATCH` `DELETE` | `/api/columns/{id}` | |
 | `GET` | `/api/columns/{id}/cards` | One column a page at a time: `?limit=&offset=`, with the column's `total` |
@@ -181,6 +181,10 @@ how a "Done" column completes the underlying todo.
 column — over the limit returns **409**. Moving a card *within* a column it
 already occupies is not checked, so a full column can still be reordered.
 
+`work_state` maps the column onto the one vocabulary every board shares —
+see [Shared work states](#shared-work-states). Every column carries it, `null`
+when nobody has mapped the column; a `PATCH` with `""` clears it.
+
 `budget_clock_state` is what landing in this column means for the card's clock:
 `running` (the work is ours to do), `paused` (someone else has the ball) or
 `stopped` (it is finished). Unset means a move here says nothing about the clock
@@ -195,7 +199,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/boards/{id}/access` | What the caller of this request may do on the board: `{"principal_id":…,"unrestricted":…,"relations":["can_view","can_edit"]}`. `relations` is every relation that holds, weakest first, with the inclusion rule already applied — ask whether the one you need is in it. Needs `can_view`; **404** otherwise |
-| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=`, `?tag=`, `?priority=`, `?status=`, `?due_before=` keep matching cards and `?sort=` orders each column — see [Filtering a board](#filtering-a-board) |
+| `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. Each card carries its shared `work_state` and `work_state_source` — see [Shared work states](#shared-work-states). `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=`, `?tag=`, `?priority=`, `?status=`, `?due_before=` keep matching cards and `?sort=` orders each column — see [Filtering a board](#filtering-a-board) |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
 | `DELETE` | `/api/boards/{id}/cards/{cardID}` | Detaches from this board only; the item survives |
@@ -204,7 +208,7 @@ Card-scoped operations, across every board the card is on:
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/cards/{id}` | One card read through the gate: `item`, the `placements` the caller can view, `links`, `assignments`, `ticket`, and `access` — what the caller may do to it. **404** for an id that is on no board, so this is not a way to read any noteboard item. noteboard checks no caller, so a client that must not see every item reads a card's body here |
+| `GET` | `/api/cards/{id}` | One card read through the gate: `item`, the `placements` the caller can view, `links`, `assignments`, `ticket`, its shared `work_state` with `work_state_source`, and `access` — what the caller may do to it. **404** for an id that is on no board, so this is not a way to read any noteboard item. noteboard checks no caller, so a client that must not see every item reads a card's body here |
 | `PATCH` | `/api/cards/{id}` | Forwarded to noteboard unchanged — edit title, body, tags, anything. Send `If-Match: "<the item's updated_at>"` to refuse saving over someone else's change: it goes to noteboard as sent, and noteboard's **412** `{"error":…,"current":{the item as it is now}}` comes back unchanged, with nothing written. No header saves whatever the version |
 | `DELETE` | `/api/cards/{id}` | Reversible; `?hard=true` purges the item and drops every placement |
 | `POST` | `/api/cards/{id}/move` | `{"board_id":…,"column_id":…,"position":…}` |
@@ -271,14 +275,22 @@ they were sent in.
 | `GET` `PUT` | `/api/boards/{id}/priority-levels` | The board's priority ladder |
 | `GET` `POST` | `/api/cards/{id}/links` | `{"entity_type":…,"entity_ref":…,"label":…,"occurred_at":…,"clock_state":…}` |
 | `DELETE` | `/api/links/{linkID}` | |
-| `GET` | `/api/entities/{type}/{ref}/cards` | Reverse lookup: every card linked to this entity, oldest link first |
+| `GET` | `/api/entities/{type}/{ref}/cards` | Reverse lookup: every card linked to this entity, oldest link first, as `{"card_id":…,"item":{…},"work_state":…,"work_state_source":{…}}` |
 
 `entity_type` is not validated against the registry and `entity_ref` is never
 resolved. `(card_id, entity_type, entity_ref)` is unique, which makes repeated
 linking idempotent.
 
-The reverse lookup returns parallel `card_id`/`item` pairs so a caller can spot
+The reverse lookup returns `card_id`/`item` pairs so a caller can spot
 orphans — a `null` item means the noteboard item is gone but the link is not.
+The item is noteboard's, unchanged, so it carries the card's `title` and
+noteboard `status`; beside it is the card's shared `work_state`. That makes one
+call enough for a rollup — project-store reads
+`/api/entities/project/project_000001/cards` and counts the open cards by
+state. However many cards the entity has, the answer costs one query here (the
+links with every placement and column) and one noteboard call
+(`POST /api/items/query`); it used to be one noteboard read per card, and one
+visibility query per card for a principal.
 
 ### Files on a card
 
@@ -457,6 +469,7 @@ session `p0`, a machine `lab`.
 |---|---|---|
 | `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…}]` |
 | `GET` | `/api/assignment-strategies` | How a board's `assignment_pool` may choose: `["least_open_cards","round_robin"]` |
+| `GET` | `/api/work-states` | The shared work-state vocabulary, each with its meaning: `[{"work_state":"not_started","meaning":…},…]` — see [Shared work states](#shared-work-states) |
 | `GET` | `/api/search?q=…` | Full-text, delegated to noteboard; `&limit=`, `&board_id=`, `&on_board=true` |
 
 `/api/entity-types` is how a client discovers where to resolve a ref it finds in
@@ -470,6 +483,52 @@ is the author's.
 
 `/api/search` passes the query to noteboard and, with `board_id` or
 `on_board=true`, keeps only results that are actually placed somewhere.
+
+## Shared work states
+
+**Boards are views, not containers.** One card can sit on several boards, and
+each board names its columns its own way — Support Desk's "Waiting on reply",
+Northwind's "Blocked". A column's `work_state` maps its name onto one
+vocabulary every board shares, so a reader that spans boards — a project
+rollup, an orchestrator counting what is waiting on someone — counts cards
+without knowing any board's column names.
+
+| `work_state` | Means |
+|---|---|
+| `not_started` | accepted as work, and nobody has begun it |
+| `working` | someone is doing it now |
+| `waiting` | blocked on a person or on another piece of work |
+| `done` | finished |
+| `dropped` | will not be done |
+
+`GET /api/work-states` serves this list; it is the only place the words live.
+A value outside it is a **400** on `POST /api/boards/{id}/columns` and
+`PATCH /api/columns/{id}`, naming the list, and nothing is written. The word is
+taken exactly as written — `Working` is refused, not folded to `working`.
+
+**A card's shared state is the column it last moved into, on any board.** Each
+placement's `updated_at` is set when the card is placed on a board and on every
+move there (a reorder within a column counts); the placement with the latest
+one wins, and a tie goes to the lower board id so every read agrees. The
+winner's column decides even when it has no `work_state`: the card then says
+`null`, though an older placement's column has one, because the latest move is
+the last thing anyone said about the work. The rule is `model.SharedWorkState`.
+
+Cards carry it as `work_state` (`null` when that column has none) and
+`work_state_source` — `board_id`, `column_id`, `column_name` and `moved_at` —
+on `GET /api/cards/{id}`, on every card of `GET /api/boards/{id}/cards` and
+`GET /api/columns/{id}/cards`, on a newly created card, and on each row of
+`GET /api/entities/{type}/{ref}/cards`. The state is the card's and every
+reader gets it, but **a board the caller cannot view is not named**: its
+`board_id`, `column_id` and `column_name` are left out and only `moved_at`
+remains. A card on no board has `work_state: null` and no source.
+
+**`work_state` does not touch `auto_status`, and neither implies the other.**
+`auto_status` writes noteboard's `open`/`done`/`archived` onto the item when a
+card lands in the column; `work_state` writes nothing anywhere and is only
+read. Coupling them would make mapping a column silently start editing
+noteboard items, and a `dropped` column may or may not want its todos
+archived. A column that should also close its todos sets both.
 
 ## Time accounting
 
@@ -953,9 +1012,9 @@ not until 2026-09-18, so a ticket list lost its requesters on page two.
 
 ## The noteboard contract
 
-kanban-store calls **seven** noteboard endpoints through **eight** client methods — the
-table below has eight rows because a plain `DELETE` and `DELETE …?hard=true` are the same
-endpoint with a different query. Seven is the number to implement; count
+kanban-store calls **eight** noteboard endpoints through **nine** client methods — the
+table below has nine rows because a plain `DELETE` and `DELETE …?hard=true` are the same
+endpoint with a different query. Eight is the number to implement; count
 `http.NewRequest` in `internal/noteboard/client.go` to check it. Anything that answers
 these can stand in for noteboard — point `KANBAN_NOTEBOARD_URL` at it. Items are treated
 as opaque JSON and passed through untouched, so an implementation may carry any
@@ -971,6 +1030,7 @@ extra fields it likes; the only one kanban-store reads is `id`.
 | `HoldItem` | `POST /api/items/{id}/hold` | **200**, the item | Parking work |
 | `UnholdItem` | `POST /api/items/{id}/unhold` | **200**, the item | Releasing it |
 | `Search` | `GET /api/search?q=…&include_held=true&limit=…` | **200**, an array of items | `/api/search` |
+| `QueryItems` | `POST /api/items/query` | **200**, `{"total","ids","items","missing_ids"}`; **400** for a filter or sort it refuses | Filtering, sorting and paging a column; the entity reverse lookup's items in one call |
 
 Behaviors it relies on:
 
@@ -987,10 +1047,12 @@ Behaviors it relies on:
 - **`include_held=true` reveals held items in search.** kanban-store always sets
   it: a board must be able to show the work parked on it, or a card could never
   be un-parked.
-- **There is no batch item endpoint.** `GetItems` fans out concurrent single
-  GETs, capped at 8, and returns results in input order with `null` for each
-  404. If you implement your own backend, one round trip per card on a board is
-  the load to expect.
+- **`GetItems` fans out concurrent single GETs**, capped at 8, and returns
+  results in input order with `null` for each 404: an unfiltered board read
+  still costs one round trip per card. `POST /api/items/query` is the batch
+  read — it answers the named ids that are live, held ones included, in the
+  order sent, and lists the rest in `missing_ids` — and serves filtered and
+  sorted reads and the entity reverse lookup.
 
 ## Development
 

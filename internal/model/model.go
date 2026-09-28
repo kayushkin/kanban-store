@@ -271,8 +271,13 @@ type Column struct {
 	// column has not been classified, and a ticket here reports no state
 	// rather than a guessed one — see model/ticket.go.
 	LifecycleState *TicketLifecycleState `json:"lifecycle_state,omitempty"`
-	CreatedAt      time.Time             `json:"created_at"`
-	UpdatedAt      time.Time             `json:"updated_at"`
+	// WorkState maps this column onto the one vocabulary every board shares
+	// (GET /api/work-states), so work can be counted across boards whatever
+	// each board calls its columns. Null means nobody has mapped the column.
+	// It writes nothing: see WorkState for why it does not imply auto_status.
+	WorkState *WorkState `json:"work_state" tstype:"WorkState | null,required"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type CreateColumnRequest struct {
@@ -284,6 +289,8 @@ type CreateColumnRequest struct {
 	BudgetClockState *ClockState `json:"budget_clock_state,omitempty"`
 	// LifecycleState classifies the column for tickets; see Column.
 	LifecycleState *string `json:"lifecycle_state,omitempty"`
+	// WorkState maps the column onto the shared vocabulary; see Column.
+	WorkState *string `json:"work_state,omitempty"`
 }
 
 func (r *CreateColumnRequest) Validate() error {
@@ -291,6 +298,9 @@ func (r *CreateColumnRequest) Validate() error {
 		return fmt.Errorf("name is required")
 	}
 	if err := validateLifecycleStateField(r.LifecycleState); err != nil {
+		return err
+	}
+	if err := validateWorkStateField(r.WorkState); err != nil {
 		return err
 	}
 	if r.AutoStatus != nil && !validStatus(*r.AutoStatus) {
@@ -313,6 +323,10 @@ type UpdateColumnRequest struct {
 	// LifecycleState reclassifies the column for tickets. An empty string
 	// clears it, which makes every ticket in the column report no state.
 	LifecycleState *string `json:"lifecycle_state,omitempty"`
+	// WorkState remaps the column onto the shared vocabulary. An empty string
+	// clears it, and every card whose latest move was into this column then
+	// reports no work_state.
+	WorkState *string `json:"work_state,omitempty"`
 }
 
 func (r *UpdateColumnRequest) Validate() error {
@@ -325,7 +339,7 @@ func (r *UpdateColumnRequest) Validate() error {
 	if err := validateLifecycleStateField(r.LifecycleState); err != nil {
 		return err
 	}
-	return nil
+	return validateWorkStateField(r.WorkState)
 }
 
 // validateLifecycleStateField accepts absent (leave it alone), empty (clear
@@ -547,6 +561,12 @@ type CardView struct {
 	// ordinary card. The lifecycle is not repeated here — it is the column
 	// this very placement names, which the reader already has.
 	Ticket *Ticket `json:"ticket,omitempty"`
+	// WorkState is the card's one shared state, which is not always this
+	// placement's column: it is the work_state of the column the card last
+	// moved into on any board (model.SharedWorkState). Null when that column
+	// has none. WorkStateSource says which placement it came from.
+	WorkState       *WorkState           `json:"work_state" tstype:"WorkState | null,required"`
+	WorkStateSource *CardWorkStateSource `json:"work_state_source,omitempty"`
 	// AutoStatusApplied and AutoStatusError report the second write a card
 	// creation makes: when the destination column carries auto_status, the
 	// noteboard item is PATCHed to match. That write can fail on its own after
@@ -594,6 +614,10 @@ type CardDetail struct {
 	Links       []CardLink       `json:"links,omitempty"`
 	Assignments []CardAssignment `json:"assignments,omitempty"`
 	Ticket      *TicketView      `json:"ticket,omitempty"`
+	// WorkState and WorkStateSource are the card's shared state across every
+	// board it sits on; see CardView.
+	WorkState       *WorkState           `json:"work_state" tstype:"WorkState | null,required"`
+	WorkStateSource *CardWorkStateSource `json:"work_state_source,omitempty"`
 	// Access is what the caller may do to this card. Editing needs can_edit on
 	// every board the card sits on, seen or not, so a card on a board the
 	// caller cannot view is can_view here however much it holds elsewhere.
@@ -601,12 +625,17 @@ type CardDetail struct {
 }
 
 // EntityCardView is one row of GET /api/entities/{type}/{ref}/cards: a card
-// that links the entity, with its noteboard item passed through unchanged.
-// Item is null when the item was hard-deleted out from under kanban-store, so
-// a caller can spot orphans.
+// that links the entity, with its noteboard item passed through unchanged —
+// the item carries the title and noteboard's status — and the card's shared
+// work_state, so one call answers a rollup such as a project's. Item is null
+// when the item is gone from noteboard but the link is not, so a caller can
+// spot orphans. WorkState is null when the card's latest column has none, and
+// WorkStateSource is absent when the card sits on no board.
 type EntityCardView struct {
-	CardID string `json:"card_id"`
-	Item   any    `json:"item" tstype:"NoteboardItem | null"`
+	CardID          string               `json:"card_id"`
+	Item            any                  `json:"item" tstype:"NoteboardItem | null"`
+	WorkState       *WorkState           `json:"work_state" tstype:"WorkState | null,required"`
+	WorkStateSource *CardWorkStateSource `json:"work_state_source,omitempty"`
 }
 
 type EntityTypeInfo struct {
