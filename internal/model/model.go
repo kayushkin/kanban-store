@@ -49,15 +49,26 @@ type Board struct {
 	// members' own declared hours and time off. Absent means the board uses
 	// DefaultPrincipalID alone. See AssignmentPool.
 	AssignmentPool *AssignmentPool `json:"assignment_pool,omitempty"`
-	// Taxonomy is what classification.run on llm-bridge-server reads when an
-	// operation names this board: the axes and values its items may be
-	// labelled with. It is separate from Classifier, which is
+	// OrganizationID is the principal-store group whose llm-bridge-server
+	// operations budget and grants classifying this board runs under, checked
+	// on write to be an active group. It is separate from
+	// Classifier.OrganizationID, which belongs to mail filing. Empty means none:
+	// a classifier refuses to publish decisions for the board.
+	OrganizationID string `json:"organization_id,omitempty"`
+	// Taxonomy is the board's current classification taxonomy revision, read
+	// only: what classification.run on llm-bridge-server reads when an
+	// operation names this board, archived entries included (a classifier
+	// uses msg's Selectable). It is separate from Classifier, which is
 	// email-classifier's mail-filing config and requires mail accounts; a
 	// board may have either, both or neither. Absent means the board has no
-	// taxonomy, and an operation naming it must bring its own or fail.
-	Taxonomy  *msg.ClassificationTaxonomy `json:"taxonomy,omitempty"`
-	CreatedAt time.Time                   `json:"created_at"`
-	UpdatedAt time.Time                   `json:"updated_at"`
+	// taxonomy, and an operation naming it must bring its own or fail. It is
+	// changed only by PUT /api/boards/{id}/classification/taxonomy.
+	Taxonomy *msg.ClassificationTaxonomy `json:"taxonomy,omitempty"`
+	// TaxonomyRevision counts the board's taxonomies from 1; 0 means it never
+	// had one. Editing anything else on the board leaves it alone.
+	TaxonomyRevision int64     `json:"taxonomy_revision"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // ClassifierConfig is what email-classifier reads off a board before filing
@@ -161,14 +172,6 @@ func (p *AssignmentPool) Validate() error {
 	return fmt.Errorf("assignment_pool.strategy %q is not one of %v (GET /api/assignment-strategies)", p.Strategy, AssignmentStrategies)
 }
 
-// ClassificationTaxonomyCleared reports whether a taxonomy is the
-// present-but-empty object a PATCH sends to remove the board's taxonomy: no
-// name, no domain and no axes. An object with only some of those set is not a
-// clear; it goes to Validate and is refused there.
-func ClassificationTaxonomyCleared(taxonomy *msg.ClassificationTaxonomy) bool {
-	return taxonomy.Name == "" && taxonomy.Domain == "" && len(taxonomy.Axes) == 0
-}
-
 type CreateBoardRequest struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`
@@ -202,9 +205,14 @@ type UpdateBoardRequest struct {
 	// object clears it; omitting the field leaves it alone. The API checks
 	// with principal-store that the principal is an active group.
 	AssignmentPool *AssignmentPool `json:"assignment_pool,omitempty"`
-	// Taxonomy replaces the board's classification taxonomy. Sending an object
-	// with no name, no domain and no axes clears it; omitting the field leaves
-	// it alone; anything else must pass the taxonomy's own Validate.
+	// OrganizationID sets the board's classification organization: a present
+	// empty string clears it, omitting it leaves it alone, and anything else
+	// must be an active principal-store group.
+	OrganizationID *string `json:"organization_id,omitempty"`
+	// Taxonomy is refused whenever it is present. The taxonomy is revisioned
+	// and written only by PUT /api/boards/{id}/classification/taxonomy with
+	// If-Match; the field stays here so that an old client sending it is told
+	// so, instead of having it silently dropped.
 	Taxonomy *msg.ClassificationTaxonomy `json:"taxonomy,omitempty"`
 }
 
@@ -224,12 +232,11 @@ func (r *UpdateBoardRequest) Validate() error {
 			return err
 		}
 	}
-	if r.Taxonomy != nil && !ClassificationTaxonomyCleared(r.Taxonomy) {
-		if err := r.Taxonomy.Validate(); err != nil {
-			return fmt.Errorf("taxonomy: %w", err)
-		}
+	if r.Taxonomy != nil {
+		return fmt.Errorf("taxonomy is not changed by PATCH: PUT /api/boards/{id}/classification/taxonomy with If-Match")
 	}
 	for name, value := range map[string]*string{
+		"organization_id":      r.OrganizationID,
 		"default_principal_id": r.DefaultPrincipalID,
 		"default_agent_id":     r.DefaultAgentID,
 		"default_instance_id":  r.DefaultInstanceID,

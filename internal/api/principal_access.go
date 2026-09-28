@@ -172,6 +172,16 @@ func levelOnCard(access *PrincipalBoardAccess, boardIDsOfCard []string) BoardAcc
 
 type principalBoardAccessContextKey struct{}
 
+type serviceCallerContextKey struct{}
+
+// calledWithServiceToken reports whether the request carried the service
+// token. An administrator is unrestricted too, but is a person: a route only
+// an internal service may use asks this, not whether access is nil.
+func calledWithServiceToken(r *http.Request) bool {
+	service, _ := r.Context().Value(serviceCallerContextKey{}).(bool)
+	return service
+}
+
 // principalBoardAccessFrom returns the request's access, nil when unrestricted.
 func principalBoardAccessFrom(r *http.Request) *PrincipalBoardAccess {
 	access, _ := r.Context().Value(principalBoardAccessContextKey{}).(*PrincipalBoardAccess)
@@ -198,7 +208,7 @@ func (a *API) principalGate(next http.Handler) http.Handler {
 				writeError(w, http.StatusUnauthorized, ServiceTokenHeader+" does not match this store's service token")
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), serviceCallerContextKey{}, true)))
 			return
 		}
 		principalID := r.Header.Get(PrincipalIDHeader)
@@ -206,51 +216,14 @@ func (a *API) principalGate(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "principal enforcement is on: send "+PrincipalIDHeader+" (set by the gateway from a login) or "+ServiceTokenHeader)
 			return
 		}
-		if !principalIDShape.MatchString(principalID) {
-			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %q is not a principal-store id (principal_000001)", PrincipalIDHeader, principalID))
+		access, administrator, refusal := a.boardAccessOfPrincipal(principalID)
+		if refusal != nil {
+			writeError(w, refusal.status, refusal.message)
 			return
 		}
-		// An administrator is past every rule below; principal-store owns that
-		// fact, and an unreachable principal-store is a 502 rather than a guess
-		// in either direction.
-		principal, err := a.principals.Get(principalID)
-		if errors.Is(err, principalstore.ErrNotFound) {
-			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %s does not exist in principal-store", PrincipalIDHeader, principalID))
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusBadGateway, "could not read the calling principal, so access is unknown and nothing is served: "+err.Error())
-			return
-		}
-		if principal.Disabled() {
-			writeError(w, http.StatusUnauthorized, fmt.Sprintf("%s %s is disabled in principal-store", PrincipalIDHeader, principalID))
-			return
-		}
-		if principal.IsAdministrator {
+		if administrator {
 			next.ServeHTTP(w, r)
 			return
-		}
-		grants, err := enforcement.Grants.EffectiveBoardGrants(principalID)
-		if errors.Is(err, grantstore.ErrPrincipalNotFound) {
-			writeError(w, http.StatusUnauthorized, err.Error())
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusBadGateway, "could not read board grants, so access is unknown and nothing is served: "+err.Error())
-			return
-		}
-		access := &PrincipalBoardAccess{PrincipalID: principalID, levels: map[string]BoardAccessLevel{}}
-		for _, grant := range grants {
-			level, known := boardAccessLevelOfRelation[grant.Relation]
-			if !known {
-				// grant-store only returns relations it serves for boards; one this
-				// store does not know grants nothing here rather than guessing.
-				log.Printf("principal access: %s holds %q on board %s, which kanban-store does not enforce; ignored", principalID, grant.Relation, grant.BoardID)
-				continue
-			}
-			if level > access.levels[grant.BoardID] {
-				access.levels[grant.BoardID] = level
-			}
 		}
 		refusal, err := a.authorizeRequest(r, access)
 		if err != nil {
@@ -263,6 +236,53 @@ func (a *API) principalGate(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalBoardAccessContextKey{}, access)))
 	})
+}
+
+// boardAccessOfPrincipal reads what a principal may do on every board: from
+// principal-store whether it exists, is enabled and is an administrator, and
+// from grant-store its board grants. The gate asks it for the caller; a route
+// that acts for someone other than its caller asks it for them. An unknown or
+// disabled principal is refused 401, and an owner that cannot answer 502: a
+// guess in either direction would be wrong.
+func (a *API) boardAccessOfPrincipal(principalID string) (access *PrincipalBoardAccess, administrator bool, refusal *accessRefusal) {
+	if !principalIDShape.MatchString(principalID) {
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %q is not a principal-store id (principal_000001)", PrincipalIDHeader, principalID)}
+	}
+	// An administrator is past every rule; principal-store owns that fact.
+	principal, err := a.principals.Get(principalID)
+	if errors.Is(err, principalstore.ErrNotFound) {
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s does not exist in principal-store", PrincipalIDHeader, principalID)}
+	}
+	if err != nil {
+		return nil, false, &accessRefusal{http.StatusBadGateway, "could not read the principal, so access is unknown and nothing is served: " + err.Error()}
+	}
+	if principal.Disabled() {
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s is disabled in principal-store", PrincipalIDHeader, principalID)}
+	}
+	if principal.IsAdministrator {
+		return nil, true, nil
+	}
+	grants, err := a.principalEnforcement.Grants.EffectiveBoardGrants(principalID)
+	if errors.Is(err, grantstore.ErrPrincipalNotFound) {
+		return nil, false, &accessRefusal{http.StatusUnauthorized, err.Error()}
+	}
+	if err != nil {
+		return nil, false, &accessRefusal{http.StatusBadGateway, "could not read board grants, so access is unknown and nothing is served: " + err.Error()}
+	}
+	access = &PrincipalBoardAccess{PrincipalID: principalID, levels: map[string]BoardAccessLevel{}}
+	for _, grant := range grants {
+		level, known := boardAccessLevelOfRelation[grant.Relation]
+		if !known {
+			// grant-store only returns relations it serves for boards; one this
+			// store does not know grants nothing here rather than guessing.
+			log.Printf("principal access: %s holds %q on board %s, which kanban-store does not enforce; ignored", principalID, grant.Relation, grant.BoardID)
+			continue
+		}
+		if level > access.levels[grant.BoardID] {
+			access.levels[grant.BoardID] = level
+		}
+	}
+	return access, false, nil
 }
 
 type accessRefusal struct {
@@ -371,6 +391,22 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 		case parts[1] == "message-triggers", parts[1] == "message-deliveries":
 			// Triggers name who gets texted and what they are sent.
 			needed = BoardAccessAdminister
+		case parts[1] == "classification":
+			// Reading decisions and labels: can_view. A review sets a card's
+			// labels: can_edit. The taxonomy and policy: can_administer.
+			// Publishing a decision is the classifier's, with the service token,
+			// so no principal may do it however much it holds.
+			switch {
+			case reading:
+				needed = BoardAccessView
+			case r.Method == http.MethodPost && len(parts) == 5 && parts[2] == "decisions" && parts[4] == "reviews":
+				needed = BoardAccessEdit
+			case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "decisions":
+				if access.LevelOn(boardID) < BoardAccessView {
+					return refuseUnseen, nil
+				}
+				return &accessRefusal{status: http.StatusForbidden, message: "decisions are published by the classifier with " + ServiceTokenHeader}, nil
+			}
 		default:
 			return refuseUnseen, nil
 		}

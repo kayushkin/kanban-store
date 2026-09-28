@@ -49,6 +49,11 @@ func (a *API) checkBoardSettings(req *model.UpdateBoardRequest) error {
 			return err
 		}
 	}
+	if req.OrganizationID != nil && *req.OrganizationID != "" {
+		if err := a.checkPrincipalIsActiveGroup("organization_id", *req.OrganizationID); err != nil {
+			return err
+		}
+	}
 	if req.AssignmentPool != nil && !req.AssignmentPool.Cleared() {
 		if err := a.checkPrincipalIsActiveGroup("assignment_pool.principal_id", req.AssignmentPool.PrincipalID); err != nil {
 			return err

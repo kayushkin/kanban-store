@@ -270,6 +270,10 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 			a.cardEffectiveDefaults(w, r, boardID, parts[2])
 			return
 		}
+		if len(parts) == 4 && parts[3] == "classification" {
+			a.cardClassificationLabels(w, r, boardID, parts[2])
+			return
+		}
 	case "priority-levels":
 		if len(parts) == 2 {
 			a.boardPriorityLevels(w, r, boardID)
@@ -300,6 +304,9 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 			a.boardCallerAccess(w, r, boardID)
 			return
 		}
+	case "classification":
+		a.boardClassificationRoutes(w, r, boardID, parts[2:])
+		return
 	}
 	writeError(w, 404, "not found")
 }
@@ -932,6 +939,12 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 			// who may read them. If they cannot be destroyed the card stays.
 			if status, err := a.purgeAttachmentsOfCard(cardID); err != nil {
 				writeError(w, status, err.Error())
+				return
+			}
+			// The text each classification decision was given is the card's
+			// text; it goes with the card, and the digest stays.
+			if err := a.store.RemoveClassificationSourcesOfCard(cardID); err != nil {
+				writeError(w, 500, "the card's classification sources could not be removed, so the card stays: "+err.Error())
 				return
 			}
 		}

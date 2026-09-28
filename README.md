@@ -139,11 +139,26 @@ the unit or a drop-in, and takes effect on restart.
 | `GET` | `/api/boards` | `?include_archived=true` to include archived boards |
 | `POST` | `/api/boards` | `{"name":…,"description":…}`; `name` required |
 | `GET` | `/api/boards/{id}` | |
-| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier`, `assignment_pool`, `taxonomy` — see [Board settings](#board-settings) |
+| `PATCH` | `/api/boards/{id}` | Any of `name`, `description`, `archived`, `business_hours`, `default_principal_id`, `default_agent_id`, `default_instance_id`, `default_bundle_id`, `classifier`, `assignment_pool`, `organization_id` — see [Board settings](#board-settings). `taxonomy` is refused here with a 400: see [Board classification](#board-classification) |
 | `GET` `PUT` | `/api/boards/{id}/tag-rules` | The board's ordered tag rules — see [Tag rules](#tag-rules) |
 | `GET` | `/api/boards/{id}/effective-defaults?tag=…&tag=…` | What a card carrying these tags gets on this board, each default with its source |
 | `GET` | `/api/boards/{id}/cards/{card_id}/effective-defaults` | The same, with the card's tags read from noteboard |
 | `DELETE` | `/api/boards/{id}` | |
+
+### Board classification routes
+
+See [Board classification](#board-classification) for what these mean.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/boards/{id}/classification` | Taxonomy, `taxonomy_revision`, policy, `supported_modes` and `caller_actions`. Writes nothing. `can_view` |
+| `PUT` | `/api/boards/{id}/classification/taxonomy` | `{"taxonomy":{…}}` or `{"taxonomy":null}`, with **`If-Match: "taxonomy-<revision>"`** (428 without, 412 stale). Answers the settings and an affected-work `preview`. `can_administer` |
+| `PUT` | `/api/boards/{id}/classification/policy` | `{"axis_policies":{"<axis id>":{"mode":"off\|discovery\|assisted"}}}`, with **`If-Match: "policy-<revision>"`**. `can_administer` |
+| `GET` | `/api/boards/{id}/classification/decisions` | Newest first, without source text. `?card_id=`, `?review_state=unreviewed\|reviewed\|needs_review`, `?axis_id=` (and `&value_id=`), `?source_digest=`, `?operation_id=`, `?limit=` (1–100, default 50), `?cursor=`. `total` counts every match. `can_view` |
+| `POST` | `/api/boards/{id}/classification/decisions` | A classifier publishes one decision: llm-bridge's `msg.BoardClassificationDecisionPublication`. **Service token only**; 201 new, 200 the same payload again, 409 a different payload under the same key |
+| `GET` | `/api/boards/{id}/classification/decisions/{decision_id}` | The decision with its source text and the taxonomy revision it was made under, every review, and the card's labels now. `can_view` |
+| `POST` | `/api/boards/{id}/classification/decisions/{decision_id}/reviews` | Accept, correct or reject, by a person (`X-Principal-Id`; the service token is 403). 201 new, 200 a replay. `can_edit` |
+| `GET` | `/api/boards/{id}/cards/{card_id}/classification` | The card's labels on this board and their `revision`. `can_view` |
 
 ### Columns
 
@@ -640,13 +655,12 @@ curl -X PATCH localhost:8305/api/boards/$BOARD -d '{
 | `classifier.hold_new_cards` | — | email-classifier |
 | `assignment_pool.principal_id` | principal-store — must be a group and not disabled | kanban-store itself, see below |
 | `assignment_pool.strategy` | nobody here — one of `GET /api/assignment-strategies`, else a 400 | kanban-store itself |
-| `taxonomy` | nobody here — the value must pass llm-bridge's `msg.ClassificationTaxonomy.Validate` (a name, at least one axis, each axis with values, no blank or repeated names), or the PATCH is a 400 with the validator's message | llm-bridge-server's `classification.run`, when an operation names the board. Separate from `classifier`, which files mail and needs mail accounts |
+| `organization_id` | principal-store — must be a group and not disabled | llm-bridge-server, whose operations classifying the board run under that organization's budget and grants; kanban-store copies it onto every decision. Separate from `classifier.organization_id`, which belongs to mail filing |
 
 An owner that says the id does not exist is a **400** and an owner that could
 not be asked is a **502**; nothing is written on either. An empty string clears
 an id, `{"classifier":{}}` clears the classifier, `{"assignment_pool":{}}`
-clears the pool and `{"taxonomy":{}}` (no
-name, no domain, no axes) clears the taxonomy; a cleared setting is absent
+clears the pool; a cleared setting is absent
 from the board on the wire, not an empty string. Omitting a field leaves it
 alone.
 
@@ -687,6 +701,76 @@ a card that arrives with no assignee is decided in this order:
 A principal-store that cannot say who is available is a **502** and the card is
 not created, the same as for the default principal. Without a pool, nothing
 above changes.
+
+### Board classification
+
+A board keeps a classification **taxonomy** — axes, each with values — and a
+**policy** saying what happens on each axis. A classifier publishes one
+immutable **decision** per card it classified; people add **reviews**; a
+card's **labels** on the board are what the reviews set. The shapes a
+classifier reads and sends are llm-bridge's (`msg.BoardClassification`,
+`msg.BoardClassificationPolicy`, `msg.BoardClassificationDecisionPublication`);
+the rest are in `internal/model/classification.go`.
+
+**Ids, not names.** Every axis and value has an id this store hands out
+(`classification_axis_000001`, `classification_value_000001`). A PUT sends the
+whole taxonomy: an entry with an id keeps it, an entry without one gets a new
+one, an id from another board or moved to another axis is a 400, and an id the
+current taxonomy has may not be left out — send it with `"archived":true` to
+retire it. An archived entry stays so history resolves and can never be chosen
+again; a classifier is shown `Selectable()`, which leaves it out. Renaming a
+value keeps its id, so every decision on it still means the same thing.
+
+**Revisions.** `taxonomy_revision` counts the board's taxonomies from 1 (0:
+never had one) and moves only when the taxonomy does — renaming the board does
+not. The same taxonomy sent again writes nothing. Each revision also has
+`taxonomy_digest`, llm-bridge's versioned `SemanticDigest` of what a classifier
+is shown (the taxonomy's own name is not part of it). Revisions are never
+rewritten. A board whose taxonomy was stored by name before revisions existed
+was moved once, at start-up, to revision 1 with fresh ids; the table
+`classification_taxonomy_migrations` records which name got which id, and a
+stored taxonomy that did not parse would have stopped the start.
+
+**Policy.** Per axis id: `off`, `discovery` (proposals recorded and shown,
+never reviewed or applied) or `assisted` (a person's review sets the label).
+There is no `auto`. An axis the policy does not name is off; a board with no
+policy says `"policy": null` and borrows nobody's. The policy is held to the
+current taxonomy, an archived axis may only be off, and a taxonomy change that
+would break the policy is a 409 until the policy changes first. Changing either
+never touches existing decisions or starts any classification.
+
+**Decisions** come only from a classifier with the service token, for an
+initiating principal who must hold `can_edit` on the board **when the decision
+is published**, not only when the run began. The store refuses one for a
+board with no `organization_id`, a card not on the board, a taxonomy revision
+or digest it does not have, a policy revision it does not have, an axis that
+policy revision has off, a value the taxonomy does not have or has archived,
+or a `source_digest` that is not the digest of the `source` sent. The
+publication key — operation, card, source digest, taxonomy, policy and prompt
+revisions — makes a second publication of the same payload return the first
+decision (200) and a different payload under the same key a 409. The source is
+kept exactly as sent and returned only by the single decision read; purging a
+card removes the source text of every decision about it and keeps the digest.
+`model_reported_confidence` is the model's own number for the whole card — not
+per axis and not a measured accuracy.
+
+**Reviews and labels.** Only a person's review sets a label: a new decision
+never changes one. A review names the axes it looked at (`axis_ids`) — accepting
+one says nothing about the others — and sends `expected_labels_revision`, the
+card's labels revision it saw; any other is a 409 with the labels as they are
+now, and nothing is written. Accept takes the decision's values, correct the
+reviewer's, and reject changes nothing. A label another review set can only be
+replaced by a review naming that review in `supersedes_review_ids` (409
+`supersedes_required` otherwise), so nobody's correction is overwritten by
+someone who did not see it. Only an `assisted` axis is reviewed. Reviews are
+never changed or removed, and `idempotency_key` — the reviewer's own — makes a
+repeated review return the first; the same key with another body is a 409.
+
+Errors on these routes carry `code` beside `error`: a stable word such as
+`taxonomy_revision_moved`, `identifier_left_out`, `publication_key_reused`,
+`labels_revision_moved` or `supersedes_required`, and `current` where there is
+a state to send against. `PATCH /api/boards/{id}` refuses `taxonomy` with a
+400 naming the route above.
 
 ### Message triggers
 
@@ -996,6 +1080,11 @@ grant-store):
   columns, ladder or tag rules, and anything about message triggers, needs
   `can_administer`. A principal who creates a board is granted `can_administer`
   on it; if that grant fails the board is deleted again and the answer is 502.
+- **Classification**: reading the settings, decisions and labels needs
+  `can_view`; reviewing needs `can_edit`; the taxonomy and policy need
+  `can_administer`. Publishing a decision takes the service token and no
+  principal, an administrator included; the store then checks that the
+  decision's initiating principal holds `can_edit` on the board at that moment.
 - **Cards**: visible when on at least one board the principal can view;
   changeable only with `can_edit` on **every** board the card sits on, because
   the content is one noteboard item shared by all of them. Attaching an existing

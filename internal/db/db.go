@@ -52,6 +52,10 @@ func New(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateBoardClassification(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -193,15 +197,21 @@ func (s *Store) GetBoard(id string) (*model.Board, error) {
 // that has never been given hours keeps a nil BusinessHours, which is what makes
 // the business-hours figures absent rather than zero further down.
 // boardColumns is the one spelling of the boards row every read shares.
+// The taxonomy is the board's newest revision, which only
+// SetBoardTaxonomy writes; see classification.go.
 const boardColumns = `id, name, description, archived, business_hours,
-	default_principal_id, default_agent_id, default_instance_id, default_bundle_id, classifier, assignment_pool, taxonomy, created_at, updated_at`
+	default_principal_id, default_agent_id, default_instance_id, default_bundle_id, classifier, assignment_pool, organization_id,
+	(SELECT taxonomy FROM classification_taxonomy_revisions WHERE board_id = boards.id ORDER BY revision DESC LIMIT 1),
+	(SELECT COALESCE(MAX(revision), 0) FROM classification_taxonomy_revisions WHERE board_id = boards.id),
+	created_at, updated_at`
 
 func scanBoard(r scanner) (*model.Board, error) {
 	b := &model.Board{}
 	var arch int
-	var hours, defaultPrincipal, defaultAgent, defaultInstance, defaultBundle, classifier, assignmentPool, taxonomy sql.NullString
+	var hours, defaultPrincipal, defaultAgent, defaultInstance, defaultBundle, classifier, assignmentPool, organization, taxonomy sql.NullString
 	if err := r.Scan(&b.ID, &b.Name, &b.Description, &arch, &hours,
-		&defaultPrincipal, &defaultAgent, &defaultInstance, &defaultBundle, &classifier, &assignmentPool, &taxonomy, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		&defaultPrincipal, &defaultAgent, &defaultInstance, &defaultBundle, &classifier, &assignmentPool, &organization,
+		&taxonomy, &b.TaxonomyRevision, &b.CreatedAt, &b.UpdatedAt); err != nil {
 		return nil, err
 	}
 	b.Archived = arch != 0
@@ -216,6 +226,7 @@ func scanBoard(r scanner) (*model.Board, error) {
 	b.DefaultAgentID = defaultAgent.String
 	b.DefaultInstanceID = defaultInstance.String
 	b.DefaultBundleID = defaultBundle.String
+	b.OrganizationID = organization.String
 	if classifier.Valid && strings.TrimSpace(classifier.String) != "" {
 		var cc model.ClassifierConfig
 		if err := json.Unmarshal([]byte(classifier.String), &cc); err != nil {
@@ -321,12 +332,8 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 			b.AssignmentPool = req.AssignmentPool
 		}
 	}
-	if req.Taxonomy != nil {
-		if model.ClassificationTaxonomyCleared(req.Taxonomy) {
-			b.Taxonomy = nil
-		} else {
-			b.Taxonomy = req.Taxonomy
-		}
+	if req.OrganizationID != nil {
+		b.OrganizationID = *req.OrganizationID
 	}
 	b.UpdatedAt = now()
 	arch := 0
@@ -357,19 +364,11 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		}
 		assignmentPool = encoded
 	}
-	var taxonomy any
-	if b.Taxonomy != nil {
-		encoded, err := nullableJSON(b.Taxonomy)
-		if err != nil {
-			return nil, err
-		}
-		taxonomy = encoded
-	}
 	_, err = s.db.Exec(
 		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?,
-		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, assignment_pool=?, taxonomy=?, updated_at=? WHERE id=?`,
+		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, assignment_pool=?, organization_id=?, updated_at=? WHERE id=?`,
 		b.Name, b.Description, arch, hours,
-		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier, assignmentPool, taxonomy,
+		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier, assignmentPool, nullableText(b.OrganizationID),
 		b.UpdatedAt, id,
 	)
 	return b, err
