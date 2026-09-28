@@ -75,6 +75,16 @@ var EntityTypes = []model.EntityTypeInfo{
 	},
 
 	{
+		Type: "project", Service: "project-store", Search: "/projects?q=",
+		Get: "/projects/{id}",
+		// Same design as prediction: project-store mints project_000001, so the
+		// pattern claims no uuid and no bare number. A card links a project
+		// with entity_type "project", and GET /api/entities/project/{id}/cards
+		// is the project's rollup of cards with their shared work_state.
+		IDPatterns: []string{`project_\d{6,}`},
+	},
+
+	{
 		Type: "principal", Service: "principal-store", Search: "/principals?q=",
 		Get: "/principals/{id}",
 		// Same design as prediction: principal-store mints principal_000001
