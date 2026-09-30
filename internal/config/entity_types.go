@@ -44,8 +44,25 @@ var EntityTypes = []model.EntityTypeInfo{
 	{Type: "service", Service: "healthcheck", Search: "/api/services?q="},
 	{Type: "skill", Service: "skill-store", Search: "/skills?q="},
 	{Type: "tool", Service: "tool-store", Search: "/tools?q="},
-	{Type: "repo"},     // local filesystem path; no upstream
+	{
+		// A card link's repo ref is a local filesystem path. A chat message
+		// names a repo as repo:<name> instead (a bare name is an ordinary
+		// word), and only that form matches the pattern, so only it is sent to
+		// repo-store's by-mention route.
+		Type: "repo", Service: "repo-store",
+		Get:        "/repos/by-mention/{id}",
+		IDPatterns: []string{`repo:[\w.-]+`},
+	},
 	{Type: "git_repo"}, // remote URL; no upstream
+	{
+		// <repo>@<sha>, where the repo is repo-store's name (dash@8487d32) or
+		// the GitHub owner/name a card link writes (kayushkin/dash@8487d32).
+		// work-graph-store reads the commit from the repo's clone. The sha is
+		// at least seven hex characters, as git abbreviates it.
+		Type: "commit", Service: "work-graph-store",
+		Get:        "/commits/{id}",
+		IDPatterns: []string{`(?:[\w.-]+/)?[\w.-]+@[0-9a-f]{7,40}`},
+	},
 	{Type: "agent", Service: "agent-store", Search: "/api/agents?q="},
 	{
 		Type: "note", Service: "noteboard", Search: "/api/items?q=",

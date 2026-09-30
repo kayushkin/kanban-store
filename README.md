@@ -467,7 +467,7 @@ session `p0`, a machine `lab`.
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…}]` |
+| `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…,"get":…,"id_patterns":[…]}]` |
 | `GET` | `/api/assignment-strategies` | How a board's `assignment_pool` may choose: `["least_open_cards","round_robin"]` |
 | `GET` | `/api/work-states` | The shared work-state vocabulary, each with its meaning: `[{"work_state":"not_started","meaning":…},…]` — see [Shared work states](#shared-work-states) |
 | `GET` | `/api/search?q=…` | Full-text, delegated to noteboard; `&limit=`, `&board_id=`, `&on_board=true` |
@@ -475,7 +475,10 @@ session `p0`, a machine `lab`.
 `/api/entity-types` is how a client discovers where to resolve a ref it finds in
 a link or a tag: which service owns that type, and what to append a query to. An
 empty `service` means kanban knows the type but no upstream can autocomplete it
-— `repo` is a filesystem path, `git_repo` a remote URL. An empty `search` on a
+— `git_repo` is a remote URL. A `repo` link's ref is a filesystem path; the
+`repo` row's `get` and `id_patterns` serve the chat's `repo:<name>` mention
+instead, which is the only form its pattern matches. A `commit` is
+`<repo>@<sha>` or `<owner>/<repo>@<sha>`, looked up in work-graph-store. An empty `search` on a
 type that *has* a service means that service has no search route, so advertising
 one would promise a lookup that does not exist. Edit
 `internal/config/entity_types.go` to match your own stack; the list shipped here

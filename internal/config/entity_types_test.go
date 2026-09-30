@@ -62,6 +62,13 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"project_12", map[string]bool{"project": false}},      // fewer than six digits
 		{"principal_123", map[string]bool{"principal": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
+		{"repo:dash", map[string]bool{"repo": true, "commit": false}},
+		{"repo:kayushkin.com", map[string]bool{"repo": true}},
+		{"dash", map[string]bool{"repo": false}}, // a bare name is prose
+		{"dash@8487d32", map[string]bool{"commit": true, "repo": false}},
+		{"kayushkin/dash@8487d32f0e5a0c4d1b3e2f6a7c8d9e0f1a2b3c4d", map[string]bool{"commit": true}},
+		{"dash@8487d3", map[string]bool{"commit": false}},  // shorter than git abbreviates
+		{"react@19.0.0", map[string]bool{"commit": false}}, // a package version
 	}
 	for _, c := range cases {
 		for typ, want := range c.wantType {
