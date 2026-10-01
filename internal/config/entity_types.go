@@ -124,6 +124,17 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{`person_\d{6,}`},
 	},
 
+	{
+		Type: "entry", Service: "journal-store", Search: "/entries?q=",
+		Get: "/entries/{id}",
+		// A piece of the operator's own writing — a journal entry, post or
+		// note — as journal-store (127.0.0.1:8322) holds it. Same design as
+		// prediction: journal-store mints entry_000001, so the pattern claims
+		// no uuid and no bare number. A deleted entry answers Get with 404, an
+		// honest miss.
+		IDPatterns: []string{`entry_\d{6,}`},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
