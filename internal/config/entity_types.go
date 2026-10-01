@@ -24,9 +24,20 @@ const UUIDPattern = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // names. Adding a resolvable type is therefore one row here — no resolver or
 // frontend change. Rows without Get (skill and tool ids are small integers,
 // email refs are compound strings) stay search-only.
+//
+// SearchResults + LabelField let a client offer a type's records as mentions
+// (dash's @ search) with no per-type code: run Search, take the array (the
+// answer itself, or the answer's SearchResults key), and show each record's
+// LabelField beside its id field. Every row with Search, Get and IDPatterns
+// must carry a LabelField; the values here were read off the live services.
 var EntityTypes = []model.EntityTypeInfo{
 	{
-		Type: "session", Service: "llm-bridge-server", Search: "/api/sessions?q=",
+		// No Search: llm-bridge-server has no /api/sessions (404, measured
+		// 2026-10-01), GET /sessions ignores q, and GET /sessions/search
+		// answers {session_id, match_count} with no label and refuses a
+		// principal. A session record names its id session_id, not id, so it
+		// carries no SearchResults or LabelField either.
+		Type: "session", Service: "llm-bridge-server",
 		Get: "/sessions/{id}",
 		// Bridge session ids are self-identifying: a snowflake with a br_
 		// prefix, or a herald-/autoworker- name ending in one. Harness session
@@ -65,8 +76,11 @@ var EntityTypes = []model.EntityTypeInfo{
 	},
 	{Type: "agent", Service: "agent-store", Search: "/api/agents?q="},
 	{
-		Type: "note", Service: "noteboard", Search: "/api/items?q=",
-		Get: "/api/items/{id}",
+		// /api/search, not /api/items: /api/items ignores q and answers the
+		// first 100 items whatever it says (measured 2026-10-01). /api/search
+		// answers a bare array of items.
+		Type: "note", Service: "noteboard", Search: "/api/search?q=",
+		Get: "/api/items/{id}", LabelField: "title",
 		// One id space for every noteboard item type (note, todo, rank,
 		// workspace); the fetched item's own `type` field is the authority on
 		// which it is.
@@ -75,7 +89,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "prediction", Service: "prediction-store", Search: "/predictions?q=",
-		Get: "/predictions/{id}",
+		Get: "/predictions/{id}", SearchResults: "predictions", LabelField: "claim",
 		// Self-identifying by design: prediction-store mints prediction_000042
 		// rather than a uuid precisely so this pattern can exist without
 		// colliding with note's uuid claim above — a bare-uuid pattern here
@@ -85,7 +99,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "article", Service: "article-store", Search: "/articles?q=",
-		Get: "/articles/{id}",
+		Get: "/articles/{id}", SearchResults: "articles", LabelField: "title",
 		// Same design as prediction: article-store mints article_000001, so
 		// the pattern claims no uuid and no bare number.
 		IDPatterns: []string{`article_\d{6,}`},
@@ -93,7 +107,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "project", Service: "project-store", Search: "/projects?q=",
-		Get: "/projects/{id}",
+		Get: "/projects/{id}", SearchResults: "projects", LabelField: "name",
 		// Same design as prediction: project-store mints project_000001, so the
 		// pattern claims no uuid and no bare number. A card links a project
 		// with entity_type "project", and GET /api/entities/project/{id}/cards
@@ -103,7 +117,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "principal", Service: "principal-store", Search: "/principals?q=",
-		Get: "/principals/{id}",
+		Get: "/principals/{id}", LabelField: "display_name",
 		// Same design as prediction: principal-store mints principal_000001
 		// rather than a uuid, so this pattern can exist without colliding with
 		// note's uuid claim. The pattern is also what the card-assignment write
@@ -114,7 +128,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "person", Service: "people-store", Search: "/persons?q=",
-		Get: "/persons/{id}",
+		Get: "/persons/{id}", LabelField: "display_name",
 		// A person in the operator's own life (friend, family, coworker), as
 		// people-store (127.0.0.1:8321) holds them for a journal and messages;
 		// not a principal, which is someone who logs in or is assigned work.
@@ -126,7 +140,7 @@ var EntityTypes = []model.EntityTypeInfo{
 
 	{
 		Type: "entry", Service: "journal-store", Search: "/entries?q=",
-		Get: "/entries/{id}",
+		Get: "/entries/{id}", LabelField: "title",
 		// A piece of the operator's own writing — a journal entry, post or
 		// note — as journal-store (127.0.0.1:8322) holds it. Same design as
 		// prediction: journal-store mints entry_000001, so the pattern claims

@@ -467,7 +467,7 @@ session `p0`, a machine `lab`.
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…,"get":…,"id_patterns":[…]}]` |
+| `GET` | `/api/entity-types` | The registry: `[{"type":…,"service":…,"search":…,"get":…,"id_patterns":[…],"search_results":…,"label_field":…}]` |
 | `GET` | `/api/assignment-strategies` | How a board's `assignment_pool` may choose: `["least_open_cards","round_robin"]` |
 | `GET` | `/api/work-states` | The shared work-state vocabulary, each with its meaning: `[{"work_state":"not_started","meaning":…},…]` — see [Shared work states](#shared-work-states) |
 | `GET` | `/api/search?q=…` | Full-text, delegated to noteboard; `&limit=`, `&board_id=`, `&on_board=true` |
@@ -480,7 +480,17 @@ empty `service` means kanban knows the type but no upstream can autocomplete it
 instead, which is the only form its pattern matches. A `commit` is
 `<repo>@<sha>` or `<owner>/<repo>@<sha>`, looked up in work-graph-store. An empty `search` on a
 type that *has* a service means that service has no search route, so advertising
-one would promise a lookup that does not exist. Edit
+one would promise a lookup that does not exist. `search_results` and
+`label_field` let a client offer a type's records as mentions with no per-type
+code: `search_results` is the key of the search answer's object that holds the
+array of records (`predictions` for prediction-store's
+`{"predictions":[…],"total":n}`), and empty means the answer is itself the
+array; `label_field` is the field of each record, in the search answer and in
+the `get` answer, that names it for a person (`title`, `display_name`, `name`,
+`claim`). Each record's id is its `id` field. Every row with `search`, `get`
+and `id_patterns` carries a `label_field`, read off the live service. `session`
+has no `search`: llm-bridge-server has no route that filters sessions by `q`
+and answers records with an `id`. Edit
 `internal/config/entity_types.go` to match your own stack; the list shipped here
 is the author's.
 

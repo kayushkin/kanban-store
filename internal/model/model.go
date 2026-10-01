@@ -653,6 +653,19 @@ type EntityTypeInfo struct {
 	// pattern matches. Empty means ids of this type have no recognizable shape
 	// and are never probed.
 	IDPatterns []string `json:"id_patterns,omitempty"`
+	// SearchResults is the key of the Search answer's object that holds the
+	// array of records (prediction-store answers {"predictions":[…],"total":n},
+	// so "predictions"). Empty means the answer is itself the array. Every
+	// record in that array, and the Get answer, carries its id in its "id"
+	// field.
+	SearchResults string `json:"search_results,omitempty"`
+	// LabelField is the field of each record — in the Search answer and in the
+	// Get answer — whose value names the record for a person ("title",
+	// "display_name", "name", "claim"). It may be empty on a given record (a
+	// journal entry may have no title). Every row with Search, Get and
+	// IDPatterns carries one, so a client can offer its records as mentions
+	// without a list of its own.
+	LabelField string `json:"label_field,omitempty"`
 }
 
 type TagCount struct {

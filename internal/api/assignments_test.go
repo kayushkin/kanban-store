@@ -498,6 +498,9 @@ func TestEntityTypesIncludePrincipal(t *testing.T) {
 		if et.Service != "principal-store" || et.Get != "/principals/{id}" || et.Search != "/principals?q=" {
 			t.Fatalf("principal row is wrong: %+v", et)
 		}
+		if et.SearchResults != "" || et.LabelField != "display_name" {
+			t.Fatalf("principal row: principal-store answers a bare array named by display_name, got search_results %q label_field %q", et.SearchResults, et.LabelField)
+		}
 		if len(et.IDPatterns) != 1 || et.IDPatterns[0] != `principal_\d{6,}` {
 			t.Fatalf("principal id pattern: %v", et.IDPatterns)
 		}

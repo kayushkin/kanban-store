@@ -18,6 +18,12 @@ func TestEntityTypeResolutionFieldsAreWellFormed(t *testing.T) {
 		if len(et.IDPatterns) > 0 && et.Get == "" {
 			t.Errorf("type %q: has IDPatterns but no Get route — a resolver could classify the id but never fetch it", et.Type)
 		}
+		if et.Search != "" && et.Get != "" && len(et.IDPatterns) > 0 && et.LabelField == "" {
+			t.Errorf("type %q: has Search, Get and IDPatterns but no LabelField — a client offering its records as mentions could not name them", et.Type)
+		}
+		if et.SearchResults != "" && et.Search == "" {
+			t.Errorf("type %q: has SearchResults but no Search route", et.Type)
+		}
 		for _, p := range et.IDPatterns {
 			if _, err := regexp.Compile(`(?i)^(?:` + p + `)$`); err != nil {
 				t.Errorf("type %q: pattern %q does not compile anchored: %v", et.Type, p, err)
