@@ -112,6 +112,18 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{PrincipalIDPattern},
 	},
 
+	{
+		Type: "person", Service: "people-store", Search: "/persons?q=",
+		Get: "/persons/{id}",
+		// A person in the operator's own life (friend, family, coworker), as
+		// people-store (127.0.0.1:8321) holds them for a journal and messages;
+		// not a principal, which is someone who logs in or is assigned work.
+		// Same design as prediction: people-store mints person_000001, so the
+		// pattern claims no uuid and no bare number. A deleted person still
+		// answers Get, so a link to them keeps resolving.
+		IDPatterns: []string{`person_\d{6,}`},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//

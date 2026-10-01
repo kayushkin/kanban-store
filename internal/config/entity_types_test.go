@@ -61,6 +61,9 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"project_000001", map[string]bool{"project": true, "prediction": false, "principal": false, "note": false}},
 		{"project_12", map[string]bool{"project": false}},      // fewer than six digits
 		{"principal_123", map[string]bool{"principal": false}}, // fewer than six digits
+		{"person_000001", map[string]bool{"person": true, "principal": false, "prediction": false, "note": false}},
+		{"principal_000001", map[string]bool{"person": false}},
+		{"person_12", map[string]bool{"person": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
 		{"repo:dash", map[string]bool{"repo": true, "commit": false}},
 		{"repo:kayushkin.com", map[string]bool{"repo": true}},
