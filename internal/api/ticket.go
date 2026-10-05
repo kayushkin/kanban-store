@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -44,7 +45,7 @@ func (a *API) cardTicket(w http.ResponseWriter, r *http.Request, cardID string) 
 	case http.MethodGet:
 		view, err := a.ticketView(cardID, principalBoardAccessFrom(r))
 		if errors.Is(err, db.ErrNotFound) {
-			writeError(w, 404, "card "+cardID+" is not a ticket")
+			writeError(w, 404, "card "+boundedtext.Value(cardID)+" is not a ticket")
 			return
 		}
 		if err != nil {
@@ -82,12 +83,12 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 	}
 	if !principalIDShape.MatchString(request.RequesterPrincipalID) {
 		writeError(w, 400, fmt.Sprintf("requester_principal_id must match ^%s$ (for example principal_000010), got %q",
-			config.PrincipalIDPattern, request.RequesterPrincipalID))
+			config.PrincipalIDPattern, boundedtext.Value(request.RequesterPrincipalID)))
 		return
 	}
 	requester, err := a.principals.Get(request.RequesterPrincipalID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		writeError(w, 400, fmt.Sprintf("requester_principal_id %s does not exist in principal-store", request.RequesterPrincipalID))
+		writeError(w, 400, fmt.Sprintf("requester_principal_id %s does not exist in principal-store", boundedtext.Value(request.RequesterPrincipalID)))
 		return
 	}
 	if err != nil {
@@ -98,7 +99,7 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 		return
 	}
 	if requester.Disabled() {
-		writeError(w, 400, fmt.Sprintf("requester_principal_id %s is disabled in principal-store", request.RequesterPrincipalID))
+		writeError(w, 400, fmt.Sprintf("requester_principal_id %s is disabled in principal-store", boundedtext.Value(request.RequesterPrincipalID)))
 		return
 	}
 	// The requester is the outside party. A human or a group here would mean a

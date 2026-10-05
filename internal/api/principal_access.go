@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/grantstore"
@@ -246,18 +247,18 @@ func (a *API) principalGate(next http.Handler) http.Handler {
 // guess in either direction would be wrong.
 func (a *API) boardAccessOfPrincipal(principalID string) (access *PrincipalBoardAccess, administrator bool, refusal *accessRefusal) {
 	if !principalIDShape.MatchString(principalID) {
-		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %q is not a principal-store id (principal_000001)", PrincipalIDHeader, principalID)}
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %q is not a principal-store id (principal_000001)", PrincipalIDHeader, boundedtext.Value(principalID))}
 	}
 	// An administrator is past every rule; principal-store owns that fact.
 	principal, err := a.principals.Get(principalID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s does not exist in principal-store", PrincipalIDHeader, principalID)}
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s does not exist in principal-store", PrincipalIDHeader, boundedtext.Value(principalID))}
 	}
 	if err != nil {
 		return nil, false, &accessRefusal{http.StatusBadGateway, "could not read the principal, so access is unknown and nothing is served: " + err.Error()}
 	}
 	if principal.Disabled() {
-		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s is disabled in principal-store", PrincipalIDHeader, principalID)}
+		return nil, false, &accessRefusal{http.StatusUnauthorized, fmt.Sprintf("%s %s is disabled in principal-store", PrincipalIDHeader, boundedtext.Value(principalID))}
 	}
 	if principal.IsAdministrator {
 		return nil, true, nil

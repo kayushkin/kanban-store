@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/llmbridge"
@@ -90,17 +91,17 @@ func (a *API) checkBoardSettings(req *model.UpdateBoardRequest) error {
 // the same answers: malformed or unknown or disabled is 400, unreachable is 502.
 func (a *API) checkPrincipalIsAssignable(principalID string) error {
 	if !principalIDShape.MatchString(principalID) {
-		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, boundedtext.Value(principalID))}
 	}
 	principal, err := a.principals.Get(principalID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id %s does not exist in principal-store", principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id %s does not exist in principal-store", boundedtext.Value(principalID))}
 	}
 	if err != nil {
 		return &settingsCheckFailure{502, "principal-store check failed: " + err.Error()}
 	}
 	if principal.Disabled() {
-		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id %s is disabled in principal-store", principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("default_principal_id %s is disabled in principal-store", boundedtext.Value(principalID))}
 	}
 	return nil
 }
@@ -112,11 +113,11 @@ func (a *API) checkPrincipalIsAssignable(principalID string) error {
 // members to choose among.
 func (a *API) checkPrincipalIsActiveGroup(field, principalID string) error {
 	if !principalIDShape.MatchString(principalID) {
-		return &settingsCheckFailure{400, fmt.Sprintf("%s must match ^%s$ (for example principal_000006), got %q", field, config.PrincipalIDPattern, principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("%s must match ^%s$ (for example principal_000006), got %q", field, config.PrincipalIDPattern, boundedtext.Value(principalID))}
 	}
 	principal, err := a.principals.Get(principalID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		return &settingsCheckFailure{400, fmt.Sprintf("%s %s does not exist in principal-store", field, principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("%s %s does not exist in principal-store", field, boundedtext.Value(principalID))}
 	}
 	if err != nil {
 		return &settingsCheckFailure{502, "principal-store check failed: " + err.Error()}
@@ -125,7 +126,7 @@ func (a *API) checkPrincipalIsActiveGroup(field, principalID string) error {
 		return &settingsCheckFailure{400, fmt.Sprintf("%s %s is a %s; it must be a principal-store group", field, principalID, principal.Kind)}
 	}
 	if principal.Disabled() {
-		return &settingsCheckFailure{400, fmt.Sprintf("%s %s is disabled in principal-store", field, principalID)}
+		return &settingsCheckFailure{400, fmt.Sprintf("%s %s is disabled in principal-store", field, boundedtext.Value(principalID))}
 	}
 	return nil
 }

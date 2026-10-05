@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 // Client talks to one bundle-store.
@@ -39,8 +41,15 @@ func (c *Client) CheckBundleExists(id string) error {
 	if err != nil {
 		return err
 	}
+	// The id is the caller's, so every message below names it bounded: the
+	// path as shown, and the URL inside a transport error.
+	shownPath := "/bundles/" + url.PathEscape(boundedtext.Value(id))
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		var urlError *url.Error
+		if errors.As(err, &urlError) {
+			urlError.URL = c.BaseURL + shownPath
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -50,13 +59,13 @@ func (c *Client) CheckBundleExists(id string) error {
 	case resp.StatusCode == http.StatusOK:
 		return nil
 	case resp.StatusCode == http.StatusNotFound && text == unroutedNotFoundBody:
-		return fmt.Errorf("bundle-store GET %s answered %s %q, which is Go's answer for a route that does not exist, not for a missing record: check that BUNDLE_STORE_URL points at bundle-store", req.URL.Path, resp.Status, text)
+		return fmt.Errorf("bundle-store GET %s answered %s %q, which is Go's answer for a route that does not exist, not for a missing record: check that BUNDLE_STORE_URL points at bundle-store", shownPath, resp.Status, text)
 	case resp.StatusCode == http.StatusNotFound:
-		return fmt.Errorf("%w: bundle %s", ErrNotFound, id)
+		return fmt.Errorf("%w: bundle %s", ErrNotFound, boundedtext.Value(id))
 	case resp.StatusCode == http.StatusBadRequest:
-		return fmt.Errorf("%w: bundle-store refused id %q (%s) — send bundle-store's numeric id, not the bundle's name", ErrNotFound, id, text)
+		return fmt.Errorf("%w: bundle-store refused id %q (%s) — send bundle-store's numeric id, not the bundle's name", ErrNotFound, boundedtext.Value(id), text)
 	default:
-		return fmt.Errorf("bundle-store GET %s: %s — %s", req.URL.Path, resp.Status, text)
+		return fmt.Errorf("bundle-store GET %s: %s — %s", shownPath, resp.Status, text)
 	}
 }
 

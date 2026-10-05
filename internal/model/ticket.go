@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 // A ticket is a card that came from outside.
@@ -100,7 +102,7 @@ func ErrUnknownTicketLifecycleState(raw string) error {
 	for _, state := range TicketLifecycleStates {
 		names = append(names, string(state))
 	}
-	return fmt.Errorf("unknown lifecycle_state %q: use one of %s", raw, strings.Join(names, ", "))
+	return fmt.Errorf("unknown lifecycle_state %q: use one of %s", boundedtext.Value(raw), strings.Join(names, ", "))
 }
 
 // Ticket is the stored row: the two facts a card cannot hold.

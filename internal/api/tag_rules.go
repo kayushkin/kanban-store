@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
@@ -127,11 +128,11 @@ func (a *API) cardEffectiveDefaults(w http.ResponseWriter, r *http.Request, boar
 	}
 	item, err := a.noteboard.GetItem(cardID)
 	if noteboard.IsNotFound(err) {
-		writeError(w, 404, "noteboard item not found: "+cardID)
+		writeError(w, 404, "noteboard item not found: "+boundedtext.Value(cardID))
 		return
 	}
 	if err != nil {
-		writeError(w, 502, "noteboard read of card "+cardID+" failed: "+err.Error())
+		writeError(w, 502, "noteboard read of card "+boundedtext.Value(cardID)+" failed: "+err.Error())
 		return
 	}
 	tags, err := tagsOfNoteboardItem(item)

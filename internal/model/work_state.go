@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 // WorkState is where a piece of work stands, in words every board shares.
@@ -70,7 +72,7 @@ func ErrUnknownWorkState(raw string) error {
 	for _, known := range WorkStates {
 		names = append(names, string(known.WorkState))
 	}
-	return fmt.Errorf("unknown work_state %q: use one of %s (GET /api/work-states)", raw, strings.Join(names, ", "))
+	return fmt.Errorf("unknown work_state %q: use one of %s (GET /api/work-states)", boundedtext.Value(raw), strings.Join(names, ", "))
 }
 
 // validateWorkStateField accepts absent (leave it alone), empty (clear it) and

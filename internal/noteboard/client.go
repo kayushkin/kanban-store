@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 type Client struct {
@@ -133,7 +135,7 @@ func (c *Client) DeleteItem(id string, hard bool) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("noteboard delete %s: %s", id, resp.Status)
+		return fmt.Errorf("noteboard delete %s: %s", boundedtext.Value(id), resp.Status)
 	}
 	return nil
 }
@@ -205,7 +207,7 @@ func (c *Client) Search(q string, limit int) ([]Item, error) {
 // notFoundError lets callers distinguish missing items from real failures.
 type notFoundError struct{ id string }
 
-func (e *notFoundError) Error() string { return "noteboard item not found: " + e.id }
+func (e *notFoundError) Error() string { return "noteboard item not found: " + boundedtext.Value(e.id) }
 
 // ItemChangedError is noteboard's 412: the patch was made against a version of
 // the item that is gone, and nothing was written. Body is noteboard's answer

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/model"
 )
 
@@ -136,7 +137,7 @@ func validateBulkCardCommandRequest(request *model.BulkCardCommandRequest) error
 		}
 	}
 	if request.PrincipalID != "" && !principalIDShape.MatchString(request.PrincipalID) {
-		return fmt.Errorf("principal_id %q is not a principal-store id (principal_000001)", request.PrincipalID)
+		return fmt.Errorf("principal_id %q is not a principal-store id (principal_000001)", boundedtext.Value(request.PrincipalID))
 	}
 	for _, tag := range request.Tags {
 		if strings.TrimSpace(tag) == "" || tag != strings.TrimSpace(tag) {

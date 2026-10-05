@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -59,12 +60,12 @@ func (a *API) cardAssignmentByPrincipal(w http.ResponseWriter, r *http.Request, 
 // an action on the card, so only it lands on the timeline.
 func (a *API) assignPrincipal(w http.ResponseWriter, r *http.Request, cardID, principalID string) {
 	if !principalIDShape.MatchString(principalID) {
-		writeError(w, 400, fmt.Sprintf("principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, principalID))
+		writeError(w, 400, fmt.Sprintf("principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, boundedtext.Value(principalID)))
 		return
 	}
 	principal, err := a.principals.Get(principalID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		writeError(w, 400, fmt.Sprintf("principal_id %s does not exist in principal-store", principalID))
+		writeError(w, 400, fmt.Sprintf("principal_id %s does not exist in principal-store", boundedtext.Value(principalID)))
 		return
 	}
 	if err != nil {
@@ -75,7 +76,7 @@ func (a *API) assignPrincipal(w http.ResponseWriter, r *http.Request, cardID, pr
 		return
 	}
 	if principal.Disabled() {
-		writeError(w, 400, fmt.Sprintf("principal_id %s is disabled in principal-store", principalID))
+		writeError(w, 400, fmt.Sprintf("principal_id %s is disabled in principal-store", boundedtext.Value(principalID)))
 		return
 	}
 	assignment, created, err := a.store.AssignPrincipalToCard(cardID, principalID, actorFrom(r))

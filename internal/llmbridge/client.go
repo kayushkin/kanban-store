@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 )
 
 // Client talks to one llm-bridge-server.
@@ -51,8 +53,15 @@ func (c *Client) CheckInstanceExists(id string) error {
 	if err != nil {
 		return err
 	}
+	// The id is the caller's, so every message below names it bounded: the
+	// path as shown, and the URL inside a transport error.
+	shownPath := "/instances/" + url.PathEscape(boundedtext.Value(id))
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		var urlError *url.Error
+		if errors.As(err, &urlError) {
+			urlError.URL = c.BaseURL + shownPath
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -67,11 +76,11 @@ func (c *Client) CheckInstanceExists(id string) error {
 		// ("instance not found"). Reading the router's body as "does not exist"
 		// would refuse every real instance while LLM_BRIDGE_URL points at the
 		// wrong service.
-		return fmt.Errorf("llm-bridge-server GET %s answered %s %q, which is Go's answer for a route that does not exist, not for a missing record: check that LLM_BRIDGE_URL points at llm-bridge-server", req.URL.Path, resp.Status, text)
+		return fmt.Errorf("llm-bridge-server GET %s answered %s %q, which is Go's answer for a route that does not exist, not for a missing record: check that LLM_BRIDGE_URL points at llm-bridge-server", shownPath, resp.Status, text)
 	case resp.StatusCode == http.StatusNotFound:
-		return fmt.Errorf("%w: instance %s", ErrNotFound, id)
+		return fmt.Errorf("%w: instance %s", ErrNotFound, boundedtext.Value(id))
 	default:
-		return fmt.Errorf("llm-bridge-server GET %s: %s — %s", req.URL.Path, resp.Status, text)
+		return fmt.Errorf("llm-bridge-server GET %s: %s — %s", shownPath, resp.Status, text)
 	}
 }
 
@@ -111,5 +120,5 @@ func (c *Client) CheckAgentExists(id string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: none of %d agents has id %s (send agent-store's numeric id, not the slug)", ErrNotFound, len(agents), id)
+	return fmt.Errorf("%w: none of %d agents has id %s (send agent-store's numeric id, not the slug)", ErrNotFound, len(agents), boundedtext.Value(id))
 }

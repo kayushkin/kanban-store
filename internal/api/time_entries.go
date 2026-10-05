@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
 	"github.com/kayushkin/kanban-store/internal/model"
@@ -127,12 +128,12 @@ func (a *API) createTimeEntry(w http.ResponseWriter, r *http.Request, cardID str
 		return
 	}
 	if !principalIDShape.MatchString(workerID) {
-		writeError(w, 400, fmt.Sprintf("worker_principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, workerID))
+		writeError(w, 400, fmt.Sprintf("worker_principal_id must match ^%s$ (for example principal_000001), got %q", config.PrincipalIDPattern, boundedtext.Value(workerID)))
 		return
 	}
 	worker, err := a.principals.Get(workerID)
 	if errors.Is(err, principalstore.ErrNotFound) {
-		writeError(w, 400, fmt.Sprintf("worker_principal_id %s does not exist in principal-store", workerID))
+		writeError(w, 400, fmt.Sprintf("worker_principal_id %s does not exist in principal-store", boundedtext.Value(workerID)))
 		return
 	}
 	if err != nil {
@@ -140,7 +141,7 @@ func (a *API) createTimeEntry(w http.ResponseWriter, r *http.Request, cardID str
 		return
 	}
 	if worker.Disabled() {
-		writeError(w, 400, fmt.Sprintf("worker_principal_id %s is disabled in principal-store", workerID))
+		writeError(w, 400, fmt.Sprintf("worker_principal_id %s is disabled in principal-store", boundedtext.Value(workerID)))
 		return
 	}
 	if worker.Kind != principalstore.KindHuman {

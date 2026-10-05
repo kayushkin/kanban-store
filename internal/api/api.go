@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
@@ -550,7 +551,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 		// tag rule may name who the card goes to on this board.
 		item, err := a.noteboard.GetItem(cardID)
 		if err != nil {
-			writeError(w, 404, "noteboard item not found: "+cardID)
+			writeError(w, 404, "noteboard item not found: "+boundedtext.Value(cardID))
 			return
 		}
 		cardTags, err := tagsOfNoteboardItem(item)
