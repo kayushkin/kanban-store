@@ -488,56 +488,31 @@ func TestDeleteItemHardUsesTheExactSpellingNoteboardTests(t *testing.T) {
 //     can. That is a fine thing for a client test to be — it just is not a
 //     tripwire on the other repo, and calling it one meant nobody looked.
 //
-// So this test now asserts what the client does with the status noteboard
-// actually sends, and the assertion that matters is unchanged: DeleteItem still
-// flattens it. See TestDeleteItemStillCannotTellAMissingItemFromAFailure.
-func TestDeleteItemReportsAMissingItemAsAPlainError(t *testing.T) {
+// DeleteItem now tells the two apart, as every other call on this client does:
+// a 404 is a typed notFoundError, anything else is a plain error. The handler
+// in internal/api/api.go answers the first with 404 and the second with 502
+// (card 66c85b68-a051-4e86-9ac4-b0ff7b39b109 asked which; this is its "yes").
+func TestDeleteItemTellsAMissingItemFromAFailure(t *testing.T) {
 	rec := &recorder{status: 404, reply: `{"error":"not found"}`}
 	c, closeFn := rec.server(t)
-	defer closeFn()
-
 	err := c.DeleteItem("gone", false)
+	closeFn()
+	if !isNotFound(err) {
+		t.Errorf("404: want a notFoundError, got %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "gone") {
+		t.Errorf("404: the error must name the id, got: %v", err)
+	}
+
+	rec = &recorder{status: 500, reply: `{"error":"whatever"}`}
+	c, closeFn = rec.server(t)
+	err = c.DeleteItem("gone", false)
+	closeFn()
 	if err == nil {
-		t.Fatal("a 404 must still be an error")
+		t.Fatal("500: must be an error")
 	}
-	if !strings.Contains(err.Error(), "gone") {
-		t.Errorf("the error must name the id, got: %v", err)
-	}
-}
-
-// TestDeleteItemStillCannotTellAMissingItemFromAFailure is the live consequence
-// of the change above, and it is deliberately an assertion about a gap rather
-// than about a repair.
-//
-// Every other call on this client goes through doJSON, which turns a 404 on a
-// named item into a typed notFoundError so a caller can tell "already gone"
-// from "the store is broken". DeleteItem does not use doJSON, so isNotFound is
-// false for both. While noteboard answered 500 that cost nothing, because no
-// 404 ever arrived here. Now one does, and internal/api/api.go reports it to
-// the browser as a **502** — deleting an already-purged card is presented as
-// noteboard being unreachable.
-//
-// Whether kanban-store should answer 404 there instead is a contract question
-// about THIS service's API, not a defect in the client, so it is filed rather
-// than decided here. This test pins the gap so the filing cannot go stale
-// silently: it fails the moment DeleteItem starts classifying, which is the
-// moment the filed question has been answered.
-func TestDeleteItemStillCannotTellAMissingItemFromAFailure(t *testing.T) {
-	for _, status := range []int{404, 500} {
-		rec := &recorder{status: status, reply: `{"error":"whatever"}`}
-		c, closeFn := rec.server(t)
-		err := c.DeleteItem("gone", false)
-		closeFn()
-
-		if err == nil {
-			t.Fatalf("status %d: must be an error", status)
-		}
-		if isNotFound(err) {
-			t.Errorf("status %d: DeleteItem now classifies notFound. If this is "+
-				"intended, the handler in internal/api/api.go must stop "+
-				"reporting a missing item as 502, and this test should be "+
-				"replaced by one asserting the new contract.", status)
-		}
+	if isNotFound(err) {
+		t.Errorf("500: a failure must not read as a missing item, got %v", err)
 	}
 }
 

@@ -134,6 +134,9 @@ func (c *Client) DeleteItem(id string, hard bool) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return &notFoundError{id: id}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("noteboard delete %s: %s", boundedtext.Value(id), resp.Status)
 	}

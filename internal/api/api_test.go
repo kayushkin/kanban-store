@@ -40,6 +40,9 @@ type fakeNoteboard struct {
 	// of applying the change. noteboard being reachable for the create and
 	// unreachable a millisecond later is the ordinary case, not an exotic one.
 	patchStatus int
+	// failStatus, when non-zero, makes every request answer that status: the
+	// noteboard that is up for one call and failing for the next.
+	failStatus int
 	// queries counts POST /api/items/query calls, so a test can tell a read
 	// that asked noteboard to filter from one that had no need to.
 	queries int
@@ -308,11 +311,10 @@ func (f *fakeNoteboard) handler() http.Handler {
 		}
 		f.mu.Unlock()
 		if !ok {
-			// noteboard answers a delete of an id it cannot find with 500 and the
-			// raw driver message, not 404 — every other missing-item route on that
-			// service answers 404. Reproduced rather than tidied, so this repo's
-			// tests exercise the behaviour that actually reaches them.
-			writeJSON(w, 500, map[string]string{"error": "sql: no rows in result set"})
+			// noteboard answers a delete of an id it cannot find with 404, like
+			// its other missing-item routes (measured live 2026-10-05; it was a
+			// 500 with the raw driver message until noteboard 23830ac).
+			writeJSON(w, 404, map[string]string{"error": "not found"})
 			return
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
@@ -361,7 +363,16 @@ func (f *fakeNoteboard) handler() http.Handler {
 		writeJSON(w, 200, out)
 	})
 
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		failStatus := f.failStatus
+		f.mu.Unlock()
+		if failStatus != 0 {
+			writeJSON(w, failStatus, map[string]string{"error": "noteboard is failing"})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // heldAt returns the stored held_at for an item, or "" if it is not held. The

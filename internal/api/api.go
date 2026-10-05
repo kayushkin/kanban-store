@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kayushkin/kanban-store/internal/boundedtext"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
 	"github.com/kayushkin/kanban-store/internal/config"
 	"github.com/kayushkin/kanban-store/internal/db"
@@ -551,7 +550,7 @@ func (a *API) boardCardByID(w http.ResponseWriter, r *http.Request, boardID, car
 		// tag rule may name who the card goes to on this board.
 		item, err := a.noteboard.GetItem(cardID)
 		if err != nil {
-			writeError(w, 404, "noteboard item not found: "+boundedtext.Value(cardID))
+			writeNoteboardItemError(w, err)
 			return
 		}
 		cardTags, err := tagsOfNoteboardItem(item)
@@ -857,7 +856,7 @@ func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, ho
 		item, err = a.noteboard.UnholdItem(cardID)
 	}
 	if err != nil {
-		writeError(w, 502, err.Error())
+		writeNoteboardItemError(w, err)
 		return
 	}
 	// Pressing stop parks the work wherever it sits, so the clock pauses on every
@@ -873,6 +872,17 @@ func (a *API) holdCard(w http.ResponseWriter, r *http.Request, cardID string, ho
 		return
 	}
 	writeJSON(w, 200, item)
+}
+
+// writeNoteboardItemError answers a failed noteboard call about one card: 404
+// when noteboard says the item does not exist, 502 when noteboard could not be
+// asked or failed. A caller told 502 retries; a caller told 404 stops.
+func writeNoteboardItemError(w http.ResponseWriter, err error) {
+	if noteboard.IsNotFound(err) {
+		writeError(w, 404, err.Error())
+		return
+	}
+	writeError(w, 502, err.Error())
 }
 
 func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
@@ -897,7 +907,7 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 				}
 				itemBefore, err := a.noteboard.GetItem(cardID)
 				if err != nil {
-					writeError(w, 502, err.Error())
+					writeNoteboardItemError(w, err)
 					return
 				}
 				defaultCeiling, err := a.spendCeilingForPriorityChange(cardID, itemBefore, newPriorityValue)
@@ -926,7 +936,7 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 			return
 		}
 		if err != nil {
-			writeError(w, 502, err.Error())
+			writeNoteboardItemError(w, err)
 			return
 		}
 		// Completing a card stops its clock, however the completion was expressed —
@@ -959,7 +969,7 @@ func (a *API) cardByID(w http.ResponseWriter, r *http.Request, cardID string) {
 			}
 		}
 		if err := a.noteboard.DeleteItem(cardID, hard); err != nil {
-			writeError(w, 502, err.Error())
+			writeNoteboardItemError(w, err)
 			return
 		}
 		// On hard delete the item is gone for good, so drop its placements too.

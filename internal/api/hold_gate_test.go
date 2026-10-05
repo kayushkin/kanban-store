@@ -88,12 +88,14 @@ func TestHoldGateRejectsNonPostAndSurfacesUpstreamFailure(t *testing.T) {
 		t.Errorf("a rejected non-POST request still held the card")
 	}
 
-	// The gate is remote. A hold that failed upstream must not answer 200 —
-	// that reads to the caller as parked work that was never parked.
-	if w := do(t, h, "POST", "/api/cards/nb-does-not-exist/hold", nil); w.Code != 502 {
-		t.Errorf("hold on a missing item: expected 502, got %d: %s", w.Code, w.Body.String())
+	// The gate is remote. A hold that noteboard refused must not answer 200 —
+	// that reads to the caller as parked work that was never parked. An item
+	// noteboard does not have is a 404; noteboard failing is a 502, which
+	// TestCardWritesSayMissingAs404AndFailureAs502 covers.
+	if w := do(t, h, "POST", "/api/cards/nb-does-not-exist/hold", nil); w.Code != 404 {
+		t.Errorf("hold on a missing item: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
-	if w := do(t, h, "POST", "/api/cards/nb-does-not-exist/unhold", nil); w.Code != 502 {
-		t.Errorf("unhold on a missing item: expected 502, got %d: %s", w.Code, w.Body.String())
+	if w := do(t, h, "POST", "/api/cards/nb-does-not-exist/unhold", nil); w.Code != 404 {
+		t.Errorf("unhold on a missing item: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
