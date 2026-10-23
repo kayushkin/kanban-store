@@ -163,6 +163,18 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{`message_\d{6,}`},
 	},
 
+	{
+		Type: "photo", Service: "photo-store",
+		Get: "/photos/{id}",
+		// One of the operator's own photos, as photo-store (127.0.0.1:8329)
+		// holds it: where the original is, when and where it was taken, and a
+		// description; the thumbnail is GET /photos/{id}/thumbnail. A timeline
+		// item cites the photos it rests on. photo-store mints photo_000001, so
+		// the pattern claims no uuid and no bare number. No Search: a mention
+		// picker should not page through private photos.
+		IDPatterns: []string{`photo_\d{6,}`},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
