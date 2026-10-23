@@ -149,6 +149,20 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{`entry_\d{6,}`},
 	},
 
+	{
+		Type: "message", Service: "multichat",
+		Get: "/api/message-log/{id}",
+		// One chat message — a text, a Discord or WhatsApp message — as
+		// multichat's message log holds it, cited from a journal timeline or a
+		// note. multichat mints message_ and the log's row id in at least six
+		// digits, so the pattern claims no uuid and no bare number. Get answers
+		// a MessageLogPage holding the one message; it needs multichat's bearer,
+		// which dash's resolver sends. Search is empty: there is no message
+		// autocomplete to offer, and a mention picker should not page through
+		// private messages.
+		IDPatterns: []string{`message_\d{6,}`},
+	},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
