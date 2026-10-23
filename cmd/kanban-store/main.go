@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/kayushkin/kanban-store/internal/api"
 	"github.com/kayushkin/kanban-store/internal/bundlestore"
@@ -67,7 +68,7 @@ func main() {
 	})
 	log.Printf("every request needs X-Principal-Id (set by the gateway from a login) or the service token; board grants come from grant-store at %s, and an administrator is past every check", cfg.GrantStoreURL)
 
-	addr := fmt.Sprintf(":%d", cfg.ListenPort)
+	addr := net.JoinHostPort(cfg.ListenHost, strconv.Itoa(cfg.ListenPort))
 	log.Printf("kanban-store listening on %s (db: %s, noteboard: %s, principal-store: %s, llm-bridge-server: %s, bundle-store: %s)",
 		addr, cfg.DatabasePath, cfg.NoteboardURL, cfg.PrincipalStoreURL, cfg.LLMBridgeServerURL, cfg.BundleStoreURL)
 	log.Fatal(http.ListenAndServe(addr, a.Handler()))

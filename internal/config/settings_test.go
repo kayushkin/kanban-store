@@ -60,6 +60,7 @@ func mustLoadFrom(t *testing.T, variables map[string]string) Config {
 func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 	t.Setenv("HOME", "/home/someone")
 	want := Config{
+		ListenHost:             "127.0.0.1",
 		ListenPort:             8305,
 		DatabasePath:           "/home/someone/.kanban-store/kanban-store.db",
 		NoteboardURL:           "http://localhost:8191",
@@ -80,6 +81,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 	}
 
 	want = Config{
+		ListenHost:             "192.0.2.1",
 		ListenPort:             9305,
 		DatabasePath:           "/srv/kanban-store.db",
 		NoteboardURL:           "http://notes.example:1",
@@ -96,6 +98,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		GrantStoreServiceToken: "another-grant-store-service-token-of-some-length",
 	}
 	got := mustLoadFrom(t, map[string]string{
+		"KANBAN_LISTEN_HOST":         "192.0.2.1",
 		"KANBAN_PORT":                "9305",
 		"KANBAN_DB":                  "/srv/kanban-store.db",
 		"KANBAN_NOTEBOARD_URL":       "http://notes.example:1",
@@ -126,7 +129,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 // Every declared variable is set to a value of its own above. If a setting is
 // added and that test is not told, this fails.
 func TestTheSameValuesTestCoversEveryDeclaredSetting(t *testing.T) {
-	if got, want := len(SettingDefinitions()), 14; got != want {
+	if got, want := len(SettingDefinitions()), 15; got != want {
 		t.Fatalf("%d settings are declared and TestLoadReadsTheSameValuesItAlwaysDid sets %d: add the new one there, then change this number", got, want)
 	}
 }

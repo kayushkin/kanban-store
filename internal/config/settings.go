@@ -26,6 +26,7 @@ const ServiceName = "kanban-store"
 // KANBAN_STORE_SERVICE_TOKENS are refused, and KANBAN_STORE_URL is not.
 var OwnedEnvironmentVariablePrefixes = []string{
 	"KANBAN_PORT",
+	"KANBAN_LISTEN",
 	"KANBAN_DB",
 	"KANBAN_NOTEBOARD",
 	"KANBAN_STORE_SERVICE_TOKEN",
@@ -33,6 +34,7 @@ var OwnedEnvironmentVariablePrefixes = []string{
 
 // Keys of the settings, as GET /settings names them.
 const (
+	SettingListenHost             = "listen_host"
 	SettingListenPort             = "listen_port"
 	SettingDatabasePath           = "database_path"
 	SettingNoteboardURL           = "noteboard_url"
@@ -53,6 +55,9 @@ const (
 // addresses explicitly; the defaults exist so a bare `make run` on the same
 // host works.
 const (
+	// DefaultListenHost is loopback: every caller (the gateway, dash,
+	// grant-store, the scheduler's jobs) is on this host.
+	DefaultListenHost         = "127.0.0.1"
 	DefaultListenPort         = 8305
 	DefaultNoteboardURL       = "http://localhost:8191"
 	DefaultPrincipalStoreURL  = "http://127.0.0.1:8314"
@@ -88,8 +93,10 @@ func DefaultDatabasePath() string {
 // parse, so a secret of any other type could reach a log through its own error.
 func SettingDefinitions() []servicesettings.Definition {
 	return []servicesettings.Definition{
+		{Key: SettingListenHost, EnvironmentVariable: "KANBAN_LISTEN_HOST", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultListenHost,
+			Description: "The interface the HTTP server listens on. The default is loopback, since every caller is on this host; an empty value or 0.0.0.0 listens on every interface."},
 		{Key: SettingListenPort, EnvironmentVariable: "KANBAN_PORT", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeInteger, Default: fmt.Sprint(DefaultListenPort),
-			Description: "The port the HTTP server listens on, on every interface. Changing it moves the service, so every KANBAN_STORE_URL (the gateway, dash, grant-store, producer, the scheduler's kanban jobs) must be told the new address."},
+			Description: "The port the HTTP server listens on, on the interface KANBAN_LISTEN_HOST names. Changing it moves the service, so every KANBAN_STORE_URL (the gateway, dash, grant-store, producer, the scheduler's kanban jobs) must be told the new address."},
 		{Key: SettingDatabasePath, EnvironmentVariable: "KANBAN_DB", Kind: msg.ServiceSettingKindPath, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultDatabasePath(), Required: true,
 			Description: "The SQLite file that holds boards, columns, card placement, links, notes and triggers. Changing it starts the service on whatever database is there, or a new empty one; the old rows stay where they were."},
 		{Key: SettingNoteboardURL, EnvironmentVariable: "KANBAN_NOTEBOARD_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultNoteboardURL,
@@ -128,6 +135,7 @@ func NewSettingsRegistry(environment servicesettings.Environment) (*servicesetti
 
 // Config is what the command starts the service with.
 type Config struct {
+	ListenHost   string
 	ListenPort   int
 	DatabasePath string
 
@@ -160,6 +168,7 @@ type Config struct {
 // token its owner asks for. An error names the variable and never its value.
 func Load(registry *servicesettings.Registry) (Config, error) {
 	loaded := Config{
+		ListenHost:             registry.String(SettingListenHost),
 		ListenPort:             registry.Integer(SettingListenPort),
 		DatabasePath:           registry.String(SettingDatabasePath),
 		NoteboardURL:           registry.String(SettingNoteboardURL),
