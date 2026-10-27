@@ -175,6 +175,17 @@ var EntityTypes = []model.EntityTypeInfo{
 		IDPatterns: []string{`photo_\d{6,}`},
 	},
 
+	// Where the operator has been, as location-store (127.0.0.1:8333) holds
+	// it: a named spot, a stay there, and a movement between two (a drive, a
+	// flight, or a road trip grouping them). A journal timeline cites the
+	// drives and trips it rests on. location-store mints place_000001,
+	// visit_000001 and trip_000001, so the patterns claim no uuid and no bare
+	// number. A deleted record answers Get with 404, an honest miss. No
+	// Search: a mention picker should not page through location history.
+	{Type: "place", Service: "location-store", Get: "/places/{id}", IDPatterns: []string{`place_\d{6,}`}},
+	{Type: "visit", Service: "location-store", Get: "/visits/{id}", IDPatterns: []string{`visit_\d{6,}`}},
+	{Type: "trip", Service: "location-store", Get: "/trips/{id}", IDPatterns: []string{`trip_\d{6,}`}},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
