@@ -186,6 +186,15 @@ var EntityTypes = []model.EntityTypeInfo{
 	{Type: "visit", Service: "location-store", Get: "/visits/{id}", IDPatterns: []string{`visit_\d{6,}`}},
 	{Type: "trip", Service: "location-store", Get: "/trips/{id}", IDPatterns: []string{`trip_\d{6,}`}},
 
+	// What the operator did online, as activity-store (127.0.0.1:8336) holds
+	// it: one search, page visit, video watched, app used or place looked up,
+	// at one time, imported from Google Takeout. A journal timeline cites the
+	// activity it rests on. activity-store mints activity_000001, so the
+	// pattern claims no uuid and no bare number. A deleted activity answers
+	// Get with 404, an honest miss. No Search: a mention picker should not
+	// page through browsing history.
+	{Type: "activity", Service: "activity-store", Get: "/activities/{id}", IDPatterns: []string{`activity_\d{6,}`}},
+
 	// Email. Three types rather than one, because the two ids a message has do
 	// different jobs and neither can stand in for the other.
 	//
