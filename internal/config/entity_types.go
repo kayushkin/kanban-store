@@ -186,6 +186,19 @@ var EntityTypes = []model.EntityTypeInfo{
 	{Type: "visit", Service: "location-store", Get: "/visits/{id}", IDPatterns: []string{`visit_\d{6,}`}},
 	{Type: "trip", Service: "location-store", Get: "/trips/{id}", IDPatterns: []string{`trip_\d{6,}`}},
 
+	// Every chat message the operator sent or received, one row each, as
+	// message-store (127.0.0.1:8337) holds it: a conversation, one message in
+	// it, or one conversation on one local day (what a journal transcript
+	// entry used to hold). message-store mints conversation_000001,
+	// chat_message_000001 and conversation_day_000001. None of the patterns
+	// matches inside another at a word boundary: multichat's message_\d{6,}
+	// does not match chat_message_000001, and conversation_\d{6,} does not
+	// match conversation_day_000001. No Search: a mention picker should not
+	// page through private messages.
+	{Type: "conversation", Service: "message-store", Get: "/conversations/{id}", IDPatterns: []string{`conversation_\d{6,}`}},
+	{Type: "chat_message", Service: "message-store", Get: "/messages/{id}", IDPatterns: []string{`chat_message_\d{6,}`}},
+	{Type: "conversation_day", Service: "message-store", Get: "/conversation-days/{id}", IDPatterns: []string{`conversation_day_\d{6,}`}},
+
 	// What the operator did online, as activity-store (127.0.0.1:8336) holds
 	// it: one search, page visit, video watched, app used or place looked up,
 	// at one time, imported from Google Takeout. A journal timeline cites the

@@ -79,6 +79,10 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"visit_000123", map[string]bool{"visit": true, "place": false, "trip": false}},
 		{"trip_000123", map[string]bool{"trip": true, "place": false, "visit": false}},
 		{"trip_12", map[string]bool{"trip": false}}, // fewer than six digits
+		{"conversation_000123", map[string]bool{"conversation": true, "conversation_day": false, "chat_message": false}},
+		{"conversation_day_000123", map[string]bool{"conversation_day": true, "conversation": false}},
+		{"chat_message_000123", map[string]bool{"chat_message": true, "message": false}},
+		{"message_000123", map[string]bool{"message": true, "chat_message": false}},
 		{"activity_000123", map[string]bool{"activity": true, "trip": false, "visit": false, "photo": false}},
 		{"activity_12", map[string]bool{"activity": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
