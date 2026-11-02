@@ -232,7 +232,51 @@ var EntityTypes = []model.EntityTypeInfo{
 	// GET /api/lookup/message-id/{messageID} — but an exact-id resolver is not a
 	// search endpoint and does not belong in this field. Adding more resolvers
 	// upstream does not change that; only a ?q= route would.
+	// Learning music, as music-practice-store (127.0.0.1:8331) holds it: one
+	// row per record type, each its own table there with its own id prefix,
+	// so each is its own chip. The store mints music_<type>_000001 for all of
+	// them; no pattern matches inside another, because every one is anchored
+	// and the type names never end in another's name plus a digit run.
+	// Get answers one record with a "label"; Search answers {"records":[…]}.
+	// Every route sits behind dash's login, which dash's resolver supplies.
+	musicPracticeType("instrument"),
+	musicPracticeType("tuning"),
+	musicPracticeType("technique"),
+	musicPracticeType("fretboard_shape"),
+	musicPracticeType("interval"),
+	musicPracticeType("scale_degree"),
+	musicPracticeType("chord_type"),
+	musicPracticeType("scale_type"),
+	musicPracticeType("progression"),
+	musicPracticeType("rhythm_pattern"),
+	musicPracticeType("form"),
+	musicPracticeType("expression_mark"),
+	musicPracticeType("theory_concept"),
+	musicPracticeType("ability"),
+	musicPracticeType("style"),
+	musicPracticeType("figure"),
+	musicPracticeType("song"),
+	musicPracticeType("performance"),
+	musicPracticeType("arrangement"),
+	musicPracticeType("passage"),
+	musicPracticeType("lesson"),
+	musicPracticeType("exercise"),
+	musicPracticeType("drill"),
+	musicPracticeType("goal"),
+
 	{Type: "email", Service: "mailstack"},
 	{Type: "email_msgid", Service: "mailstack"},
 	{Type: "email_sender", Service: "mailstack"},
+}
+
+// musicPracticeType is a music-practice-store record type's registry row.
+func musicPracticeType(table string) model.EntityTypeInfo {
+	prefix := "music_" + table
+	return model.EntityTypeInfo{
+		Type: prefix, Service: "music-practice-store",
+		Search:        "/api/music-practice/types/" + table + "/records?q=",
+		Get:           "/api/music-practice/records/{id}",
+		SearchResults: "records", LabelField: "label",
+		IDPatterns: []string{prefix + `_\d{6,}`},
+	}
 }

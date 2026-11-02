@@ -76,6 +76,10 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"message_12", map[string]bool{"message": false}}, // fewer than six digits
 		{"photo_000123", map[string]bool{"photo": true, "message": false, "entry": false, "note": false}},
 		{"place_000123", map[string]bool{"place": true, "visit": false, "trip": false, "photo": false}},
+		{"music_scale_type_000001", map[string]bool{"music_scale_type": true, "music_scale_degree": false, "music_style": false}},
+		{"music_chord_type_000042", map[string]bool{"music_chord_type": true, "music_scale_type": false}},
+		{"music_song_000001", map[string]bool{"music_song": true, "music_performance": false}},
+		{"music_style_12", map[string]bool{"music_style": false}}, // fewer than six digits
 		{"visit_000123", map[string]bool{"visit": true, "place": false, "trip": false}},
 		{"trip_000123", map[string]bool{"trip": true, "place": false, "visit": false}},
 		{"trip_12", map[string]bool{"trip": false}}, // fewer than six digits
