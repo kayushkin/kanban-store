@@ -262,6 +262,9 @@ var EntityTypes = []model.EntityTypeInfo{
 	musicPracticeType("lesson"),
 	musicPracticeType("exercise"),
 	musicPracticeType("drill"),
+	musicPracticeType("curriculum"),
+	musicPracticeType("curriculum_level"),
+	musicPracticeType("requirement"),
 	musicPracticeType("goal"),
 
 	{Type: "email", Service: "mailstack"},
