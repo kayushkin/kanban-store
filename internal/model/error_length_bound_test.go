@@ -112,7 +112,7 @@ func TestTheBoundedErrorStillIdentifiesTheValueAndTheProblem(t *testing.T) {
 	}
 }
 
-// A value cut at the ceiling still has to be recognisable as the caller's, which
+// A value cut at the ceiling still has to be recognizable as the caller's, which
 // means the leading bytes survive.
 func TestALongValueIsCutRatherThanReplaced(t *testing.T) {
 	h := &BusinessHours{TZID: "Europe/" + caller, Days: []string{"MO"}, Start: "09:00", End: "17:00"}

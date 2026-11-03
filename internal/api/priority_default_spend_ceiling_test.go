@@ -108,7 +108,7 @@ func TestPriorityChangeMovesADefaultedCeilingButNotAHandSetOne(t *testing.T) {
 		t.Errorf("after moving to a rung with no default ceiling = %v, want 20 kept", got)
 	}
 
-	// Set by hand, then re-prioritised: the hand-set number stays.
+	// Set by hand, then re-prioritized: the hand-set number stays.
 	do(t, h, "PATCH", "/api/cards/"+cardID, map[string]any{"auto_hold_at_usd": 7.5})
 	do(t, h, "PATCH", "/api/cards/"+cardID, map[string]any{"priority": 2})
 	if got := ceilingOf(t, nb, cardID); got != 7.5 {

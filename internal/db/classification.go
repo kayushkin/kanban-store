@@ -1088,7 +1088,7 @@ func reviewsOfDecision(run executor, decisionID string) ([]model.ClassificationR
 }
 
 // CardClassificationLabels is every label a card carries on a board, with
-// the labels revision; a card never labelled has revision 0 and no labels.
+// the labels revision; a card never labeled has revision 0 and no labels.
 func (s *Store) CardClassificationLabels(boardID, cardID string) (*model.CardClassificationLabels, error) {
 	if _, err := s.GetPlacement(cardID, boardID); err != nil {
 		return nil, err

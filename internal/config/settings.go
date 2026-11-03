@@ -20,7 +20,7 @@ const ServiceName = "kanban-store"
 //
 // They stop short of "KANBAN_" on purpose. KANBAN_STORE_URL is how every other
 // service finds this one, KANBAN_URL is how dash does, and the scheduler's
-// kanban jobs read KANBAN_CLASSIFIER_MODEL and its neighbours. One shared
+// kanban jobs read KANBAN_CLASSIFIER_MODEL and its neighbors. One shared
 // environment file carrying any of them would stop the service over a variable
 // that was never meant for it. So KANBAN_PORTS, KANBAN_DB_PATH and
 // KANBAN_STORE_SERVICE_TOKENS are refused, and KANBAN_STORE_URL is not.

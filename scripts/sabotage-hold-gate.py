@@ -75,7 +75,7 @@ CASES = [
         replace='hold bool) {\n\tif r.Method != "POST" {\n\t\twriteError(w, 405, "method not supported")',
         expect_caught=False,
         why=(
-            "The status code carries the behaviour; the sentence does not. If "
+            "The status code carries the behavior; the sentence does not. If "
             "this reports CAUGHT the suite is asserting on prose, and every "
             "other CAUGHT below is suspect."
         ),
@@ -131,7 +131,7 @@ CASES = [
         why=(
             "The reason is the only record of WHY work was parked. Dropping it "
             "leaves a hold that still holds, so nothing about the gate's "
-            "behaviour reveals the loss."
+            "behavior reveals the loss."
         ),
     ),
     Case(

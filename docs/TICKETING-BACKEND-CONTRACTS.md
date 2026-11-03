@@ -20,7 +20,7 @@ Measured in this repo and its siblings on 2026-10-19.
 | Ticket content and its version | noteboard | `PATCH` with `If-Match: "<updated_at>"`; a stale write is a 412 carrying the current item, relayed unchanged by `PATCH /api/cards/{id}` |
 | Placement, assignment, timing | kanban-store | `card_events` log; assignment `PUT` is idempotent (201 then 200); moves have **no** version check |
 | Classification | kanban-store | revisioned taxonomy (`If-Match: "taxonomy-<rev>"`), immutable decisions keyed by publication key, append-only reviews with `idempotency_key` and `expected_labels_revision` |
-| Rule-like behaviour | kanban-store | tag rules override four board defaults on arrival; message triggers on five event kinds, with `message_deliveries` unique on `(trigger_id, event_id)` |
+| Rule-like behavior | kanban-store | tag rules override four board defaults on arrival; message triggers on five event kinds, with `message_deliveries` unique on `(trigger_id, event_id)` |
 | Assignment on arrival | kanban-store | tag rule → pool (`least_open_cards` / `round_robin` over principal-store `available_at`) → board default; recorded on the `assigned` event with its source |
 | Declared working hours | principal-store | `availability` and `time_off`; "no schedule is unknown, and unknown is never available" |
 | Who may do what | grant-store, `is_administrator` | per-resource relations; read at the moment of each effect |
@@ -152,7 +152,7 @@ label filter), `claimed_at`, `last_heartbeat_at`, `ended_at`, `end_reason`
 ## 4. Routing
 
 Replaces assignment-on-arrival only for boards that opt in; boards that do not
-keep kanban-store's current behaviour unchanged.
+keep kanban-store's current behavior unchanged.
 
 **Record `routing_policy`** (revisioned like rules): ordered stages, each
 `{candidates: duty_claims | group | principal, strategy: least_open_cards |

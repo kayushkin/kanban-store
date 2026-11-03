@@ -735,7 +735,7 @@ func TestBackdatingAFactLinkIsRefused(t *testing.T) {
 	}
 }
 
-// Without occurred_at the behaviour is unchanged: the arrival is stamped when
+// Without occurred_at the behavior is unchanged: the arrival is stamped when
 // the link was made.
 func TestALinkWithoutOccurredAtStillStampsNow(t *testing.T) {
 	h, _, cleanup := setup(t)

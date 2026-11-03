@@ -1231,7 +1231,7 @@ export interface BoardView {
   columns: ColumnView[];
   orphans?: CardView[];
   /**
-   * PriorityLadder is the board's rungs, so a client can label and colour a card
+   * PriorityLadder is the board's rungs, so a client can label and color a card
    * without asking a second time. An empty ladder means this board ignores
    * priorities.
    */

@@ -532,7 +532,7 @@ type BoardView struct {
 	Board   *Board       `json:"board" tstype:"Board,required"`
 	Columns []ColumnView `json:"columns"`
 	Orphans []CardView   `json:"orphans,omitempty"`
-	// PriorityLadder is the board's rungs, so a client can label and colour a card
+	// PriorityLadder is the board's rungs, so a client can label and color a card
 	// without asking a second time. An empty ladder means this board ignores
 	// priorities.
 	PriorityLadder *PriorityLadder `json:"priority_ladder,omitempty"`

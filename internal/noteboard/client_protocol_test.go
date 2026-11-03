@@ -629,7 +629,7 @@ func TestSearchEmptyQueryIsAnErrorNotAnEmptyResult(t *testing.T) {
 
 // ============================ doJSON, the chokepoint ============================
 
-// Seven of the eight calls share this transport, so one wrong judgement here is
+// Seven of the eight calls share this transport, so one wrong judgment here is
 // seven wrong calls.
 func TestDoJSONTreatsAnUnexpectedStatusAsAnError(t *testing.T) {
 	rec := &recorder{status: 503, reply: `{"error":"upstream is down"}`}

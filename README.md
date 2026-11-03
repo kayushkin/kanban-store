@@ -127,7 +127,7 @@ All request and response bodies are JSON.
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/settings` | What the process was started with: every declared setting, its kind (`wiring`, `path`, `secret`, `behaviour`), the value in force and whether it came from the environment or the default. A secret shows only whether it is set. **The service token or an administrator only**: a member is 403 whatever boards they hold, and no caller is 401 |
+| `GET` | `/settings` | What the process was started with: every declared setting, its kind (`wiring`, `path`, `secret`, `behavior`), the value in force and whether it came from the environment or the default. A secret shows only whether it is set. **The service token or an administrator only**: a member is 403 whatever boards they hold, and no caller is 401 |
 
 Nothing is editable, so there is no `PUT /settings/{key}`: a setting changes in
 the unit or a drop-in, and takes effect on restart.
