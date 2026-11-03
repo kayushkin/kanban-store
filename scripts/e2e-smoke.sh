@@ -17,7 +17,7 @@
 #     noteboard-independent routes (boards, columns, links, entity tags,
 #     WIP enforcement) are asserted for real here.
 #   Phase B restarts against an in-script stub noteboard (python3, in-memory,
-#     only the five endpoints internal/noteboard/client.go actually calls) so
+#     the endpoints internal/noteboard/client.go actually calls) so
 #     the card lifecycle — create, board-view assembly, move + auto_status
 #     write-back, attach/detach — is exercised end to end. The real noteboard
 #     on :8191 is never contacted.
@@ -405,7 +405,8 @@ class Handler(BaseHTTPRequestHandler):
         return unquote(path[len(prefix):]) if path.startswith(prefix) else None
 
     def do_POST(self):
-        if urlparse(self.path).path == "/api/items/query":
+        path = urlparse(self.path).path
+        if path == "/api/items/query":
             q = self._read()
             with LOCK:
                 found = [ITEMS[i] for i in q.get("ids", []) if i in ITEMS]
@@ -414,7 +415,17 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("include_items"):
                 answer["items"] = found
             return self._send(200, answer)
-        if urlparse(self.path).path != "/api/items":
+        if path == "/api/items/batch":
+            p = self._read()
+            if set(p) != {"ids"} or not isinstance(p["ids"], list):
+                return self._send(400, {"error": "ids is required"})
+            with LOCK:
+                items = []
+                for item_id in p["ids"]:
+                    item = ITEMS.get(item_id)
+                    items.append(dict(item) if item and not item.get("deleted_at") else None)
+            return self._send(200, {"items": items})
+        if path != "/api/items":
             return self._send(404, {"error": "not found"})
         p = self._read()
         if not p.get("title"):

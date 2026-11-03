@@ -41,6 +41,7 @@ func (a *API) cardAssignments(w http.ResponseWriter, r *http.Request, cardID str
 		writeError(w, 500, err.Error())
 		return
 	}
+	w.Header().Set("ETag", db.AssignmentVersion(assignments))
 	writeJSON(w, 200, assignments)
 }
 
@@ -79,7 +80,11 @@ func (a *API) assignPrincipal(w http.ResponseWriter, r *http.Request, cardID, pr
 		writeError(w, 400, fmt.Sprintf("principal_id %s is disabled in principal-store", boundedtext.Value(principalID)))
 		return
 	}
-	assignment, created, err := a.store.AssignPrincipalToCard(cardID, principalID, actorFrom(r))
+	assignment, created, err := a.store.AssignPrincipalToCardIfVersion(cardID, principalID, actorFrom(r), r.Header.Get("If-Match"))
+	if errors.Is(err, db.ErrAssignmentsChanged) {
+		writeError(w, 412, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return

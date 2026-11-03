@@ -380,7 +380,7 @@ func (a *API) authorizeRequest(r *http.Request, access *PrincipalBoardAccess) (*
 				}
 				return a.requireOnCard(access, parts[2], BoardAccessView, "attaching a card")
 			}
-		case parts[1] == "columns", parts[1] == "priority-levels", parts[1] == "tag-rules", parts[1] == "effective-defaults":
+		case parts[1] == "card-page", parts[1] == "columns", parts[1] == "priority-levels", parts[1] == "tag-rules", parts[1] == "effective-defaults":
 			if reading {
 				needed = BoardAccessView
 			}

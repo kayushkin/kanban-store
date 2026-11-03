@@ -538,6 +538,18 @@ type BoardView struct {
 	PriorityLadder *PriorityLadder `json:"priority_ladder,omitempty"`
 }
 
+// BoardCardPage is a globally sorted page across a board's columns. The
+// metadata is complete; Cards is only the requested page, Total all matches.
+type BoardCardPage struct {
+	Board          *Board          `json:"board" tstype:"Board,required"`
+	Columns        []*Column       `json:"columns" tstype:"Column[],required"`
+	PriorityLadder *PriorityLadder `json:"priority_ladder,omitempty"`
+	Cards          []CardView      `json:"cards"`
+	Total          int             `json:"total"`
+	Limit          int             `json:"limit"`
+	Offset         int             `json:"offset"`
+}
+
 type ColumnView struct {
 	Column *Column    `json:"column" tstype:"Column,required"`
 	Cards  []CardView `json:"cards"`
@@ -551,7 +563,9 @@ type ColumnView struct {
 // through unchanged), links and assignments. Item is `any` so we don't
 // redefine noteboard's Item shape here.
 type CardView struct {
-	Placement *Placement `json:"placement" tstype:"Placement,required"`
+	// Classification is the reviewed board label state, separate from legacy content tags.
+	Classification *CardClassificationLabels `json:"classification,omitempty"`
+	Placement      *Placement                `json:"placement" tstype:"Placement,required"`
 	// Item is the noteboard item, passed through unchanged; null when the item
 	// was hard-deleted out from under kanban-store (see BoardView.Orphans).
 	Item        any              `json:"item" tstype:"NoteboardItem | null"`

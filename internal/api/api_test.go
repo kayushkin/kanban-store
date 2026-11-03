@@ -100,6 +100,7 @@ func (f *fakeNoteboard) handler() http.Handler {
 		id := "nb-" + itoa(f.seq)
 		payload["id"] = id
 		payload["updated_at"] = f.nextVersion()
+		payload["created_at"] = payload["updated_at"]
 		if _, ok := payload["status"]; !ok {
 			payload["status"] = "open"
 		}
@@ -107,6 +108,27 @@ func (f *fakeNoteboard) handler() http.Handler {
 		out := clone(payload)
 		f.mu.Unlock()
 		writeJSON(w, 201, out)
+	})
+
+	mux.HandleFunc("POST /api/items/batch", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		items := make([]map[string]any, len(request.IDs))
+		for i, id := range request.IDs {
+			if item, ok := f.items[id]; ok {
+				if _, deleted := item["deleted_at"]; !deleted {
+					items[i] = clone(item)
+				}
+			}
+		}
+		writeJSON(w, 200, map[string]any{"items": items})
 	})
 
 	mux.HandleFunc("GET /api/items/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +163,9 @@ func (f *fakeNoteboard) handler() http.Handler {
 	// missing_ids are the ids naming no live item, whatever the filter.
 	mux.HandleFunc("POST /api/items/query", func(w http.ResponseWriter, r *http.Request) {
 		var query struct {
+			Q            string   `json:"q"`
+			CreatedFrom  string   `json:"created_from"`
+			CreatedTo    string   `json:"created_to"`
 			IDs          []string `json:"ids"`
 			Tags         []string `json:"tags"`
 			Priorities   []int    `json:"priorities"`
@@ -157,7 +182,7 @@ func (f *fakeNoteboard) handler() http.Handler {
 			writeJSON(w, 400, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
 		}
-		sorts := map[string]bool{"": true, "given": true, "priority": true, "due_at": true, "updated_at": true, "created_at": true, "title": true}
+		sorts := map[string]bool{"": true, "given": true, "priority": true, "due_at": true, "updated_at": true, "created_at": true, "updated_asc": true, "title": true}
 		if !sorts[query.Sort] {
 			writeJSON(w, 400, map[string]string{"error": fmt.Sprintf("sort %q is not one of [given priority due_at updated_at created_at title] (GET /api/items/query-options)", query.Sort)})
 			return
@@ -177,6 +202,18 @@ func (f *fakeNoteboard) handler() http.Handler {
 				continue
 			}
 			keep := true
+			if query.Q != "" {
+				keep = strings.Contains(strings.ToLower(fmt.Sprint(item["title"])+"\n"+fmt.Sprint(item["body"])+"\n"+id), strings.ToLower(query.Q))
+			}
+			created, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(item["created_at"]))
+			if query.CreatedFrom != "" {
+				bound, err := time.Parse(time.RFC3339Nano, query.CreatedFrom)
+				keep = keep && err == nil && !created.Before(bound)
+			}
+			if query.CreatedTo != "" {
+				bound, err := time.Parse(time.RFC3339Nano, query.CreatedTo)
+				keep = keep && err == nil && !created.After(bound)
+			}
 			carried := map[string]bool{}
 			if tags, ok := item["tags"].([]any); ok {
 				for _, tag := range tags {
@@ -212,6 +249,18 @@ func (f *fakeNoteboard) handler() http.Handler {
 		priorityOf := func(item map[string]any) float64 { number, _ := item["priority"].(float64); return number }
 		sort.SliceStable(matches, func(i, j int) bool {
 			switch query.Sort {
+			case "updated_at", "created_at", "updated_asc":
+				key := query.Sort
+				if key == "updated_asc" {
+					key = "updated_at"
+				}
+				left, right := fmt.Sprint(matches[i].item[key]), fmt.Sprint(matches[j].item[key])
+				if left != right {
+					if query.Sort == "updated_asc" {
+						return left < right
+					}
+					return left > right
+				}
 			case "priority":
 				if priorityOf(matches[i].item) != priorityOf(matches[j].item) {
 					return priorityOf(matches[i].item) > priorityOf(matches[j].item)

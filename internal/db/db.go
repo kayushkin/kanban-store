@@ -19,6 +19,8 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+var ErrBoardChanged = errors.New("board changed; reload before saving")
+
 type Store struct {
 	db *sql.DB
 }
@@ -277,9 +279,20 @@ func nullableJSON(value any) (any, error) {
 }
 
 func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Board, error) {
+	return s.UpdateBoardIfVersion(id, req, nil)
+}
+
+// UpdateBoardIfVersion compares the caller's version before editing and the
+// version read at the database write. Even unconditional callers cannot replace
+// fields copied from a row another writer has changed in the meantime.
+func (s *Store) UpdateBoardIfVersion(id string, req *model.UpdateBoardRequest, expected *time.Time) (*model.Board, error) {
 	b, err := s.GetBoard(id)
 	if err != nil {
 		return nil, err
+	}
+	previousVersion := b.UpdatedAt
+	if expected != nil && !expected.Equal(previousVersion) {
+		return nil, ErrBoardChanged
 	}
 	if req.Name != nil {
 		b.Name = *req.Name
@@ -340,6 +353,9 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		b.OrganizationID = *req.OrganizationID
 	}
 	b.UpdatedAt = now()
+	if !b.UpdatedAt.After(previousVersion) {
+		b.UpdatedAt = previousVersion.Add(time.Nanosecond)
+	}
 	arch := 0
 	if b.Archived {
 		arch = 1
@@ -368,14 +384,24 @@ func (s *Store) UpdateBoard(id string, req *model.UpdateBoardRequest) (*model.Bo
 		}
 		assignmentPool = encoded
 	}
-	_, err = s.db.Exec(
+	result, err := s.db.Exec(
 		`UPDATE boards SET name=?, description=?, archived=?, business_hours=?,
-		 default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, assignment_pool=?, organization_id=?, updated_at=? WHERE id=?`,
+         default_principal_id=?, default_agent_id=?, default_instance_id=?, default_bundle_id=?, classifier=?, assignment_pool=?, organization_id=?, updated_at=? WHERE id=? AND updated_at=?`,
 		b.Name, b.Description, arch, hours,
 		nullableText(b.DefaultPrincipalID), nullableText(b.DefaultAgentID), nullableText(b.DefaultInstanceID), nullableText(b.DefaultBundleID), classifier, assignmentPool, nullableText(b.OrganizationID),
-		b.UpdatedAt, id,
+		b.UpdatedAt, id, previousVersion,
 	)
-	return b, err
+	if err != nil {
+		return nil, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if count != 1 {
+		return nil, ErrBoardChanged
+	}
+	return b, nil
 }
 
 func (s *Store) DeleteBoard(id string) error {

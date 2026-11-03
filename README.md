@@ -200,6 +200,7 @@ A card is a noteboard item plus a placement. Board-scoped operations:
 |---|---|---|
 | `GET` | `/api/boards/{id}/access` | What the caller of this request may do on the board: `{"principal_id":…,"unrestricted":…,"relations":["can_view","can_edit"]}`. `relations` is every relation that holds, weakest first, with the inclusion rule already applied — ask whether the one you need is in it. Needs `can_view`; **404** otherwise |
 | `GET` | `/api/boards/{id}/cards` | The assembled board: columns, each with its cards in order, plus `orphans`. Each card carries its shared `work_state` and `work_state_source` — see [Shared work states](#shared-work-states). `?limit=` caps **each column**; `?assignee=`, `?unassigned=`, `?tickets_only=`, `?requester=`, `?channel=`, `?tag=`, `?priority=`, `?status=`, `?due_before=` keep matching cards and `?sort=` orders each column — see [Filtering a board](#filtering-a-board) |
+| `GET` | `/api/boards/{id}/card-page` | One global page across columns; required `limit`, optional `offset`. Returns board/column metadata, complete page cards and exact matching `total`. Same board view grants as `/cards` |
 | `POST` | `/api/boards/{id}/cards` | Creates the noteboard item **and** places it; `title` and `column_id` required |
 | `PUT` | `/api/boards/{id}/cards/{cardID}` | Attaches an *existing* noteboard item; 404 if that item does not exist |
 | `DELETE` | `/api/boards/{id}/cards/{cardID}` | Detaches from this board only; the item survives |
@@ -425,6 +426,13 @@ and neither is what "assigned" means. Principals are owned by the
 | `PUT` | `/api/cards/{id}/assignments/{principal_id}` | Idempotent: **201** + the row when this call created it, **200** + the unchanged row when it was already there. `assigned_by` is `?actor=` |
 | `DELETE` | `/api/cards/{id}/assignments/{principal_id}` | **204**; **404** if the principal was not on the card |
 | `GET` | `/api/assignments?principal_id=…` | Reverse lookup: every card this principal is on, across every board, oldest first. **400** without the parameter |
+
+`GET /api/cards/{id}/assignments` returns an `ETag` for the exact assignment snapshot.
+Automatic owners can send that value as `If-Match` on the assignment `PUT`.
+The snapshot check and insert share a SQLite writer transaction; if any assignment
+was added, removed, or replaced, the write returns **412** without adding the owner.
+An omitted header retains the existing idempotent assignment behavior. Clients
+must not silently retry a 412 with a fresh snapshot: re-evaluate the ownership rule.
 
 Assignments ride along on every card view — `assignments` on each card in
 `GET /api/boards/{id}/cards` and `GET /api/columns/{id}/cards` — and the field is
@@ -1060,12 +1068,14 @@ Behaviors it relies on:
 - **`include_held=true` reveals held items in search.** kanban-store always sets
   it: a board must be able to show the work parked on it, or a card could never
   be un-parked.
-- **`GetItems` fans out concurrent single GETs**, capped at 8, and returns
-  results in input order with `null` for each 404: an unfiltered board read
-  still costs one round trip per card. `POST /api/items/query` is the batch
-  read — it answers the named ids that are live, held ones included, in the
-  order sent, and lists the rest in `missing_ids` — and serves filtered and
-  sorted reads and the entity reverse lookup.
+- **Batch item reads use `POST /api/items/batch {"ids":[…]}`.** The result is
+  `{"items":[…]}` in input order, including duplicate ids and null slots for
+  missing/deleted records. Full content and held items survive unchanged.
+  A failed or malformed batch is an error, never a board full of orphans.
+  Deploy noteboard with batch support alongside this client.
+  `POST /api/items/query` — which answers the named ids that are live, held
+  ones included, in the order sent, and lists the rest in `missing_ids` —
+  serves filtered and sorted reads and the entity reverse lookup.
 
 ## Development
 
@@ -1179,3 +1189,28 @@ grant-store):
 - Any route without a rule in `internal/api/principal_access.go` is **403**, so a
   new route stays closed until someone decides who may use it.
 - grant-store unreachable is **502**; nothing is served on a guess.
+
+### Global board pages
+
+`GET /api/boards/{id}/card-page?limit=25&offset=0&sort=updated_at` filters and
+sorts the entire authorized board before paging. Placement/assignment filters
+use this store; the matching ids go to noteboard once, and only the requested
+page's complete content comes back. It supports the existing content filters,
+plus literal Unicode-insensitive `q`, inclusive RFC3339 `created_from` and
+`created_to`, repeated `lifecycle` or `exclude_lifecycle`, exact `card_id`, and
+`priority_label` resolved from this board's ladder (mutually exclusive with
+numeric `priority`). An unset lifecycle remains eligible unless an inclusion
+filter asks for a specific state. `sort` passes to noteboard unchanged, including
+`updated_asc`. Ties retain column/placement order. Missing/deleted items are not
+matches; the full `/cards` view continues to report them as orphans.
+
+### Conditional board updates
+
+`GET /api/boards/{id}` and successful `PATCH` responses return an `ETag`:
+that board's quoted `updated_at` timestamp. Send that exact value in `If-Match`
+on a board `PATCH` to reject a stale save with HTTP 412. This endpoint accepts
+one quoted board ETag or `*`; malformed/unsupported conditions return 400.
+An omitted header preserves the existing API, but a write racing another board
+update is rejected with 409. Every update compares the version read in its
+SQL UPDATE, so the comparison and write are atomic; even legacy callers cannot
+silently replace fields read before another update. A failed save changes nothing.

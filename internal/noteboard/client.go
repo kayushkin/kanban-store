@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kayushkin/kanban-store/internal/boundedtext"
@@ -143,41 +142,50 @@ func (c *Client) DeleteItem(id string, hard bool) error {
 	return nil
 }
 
-// GetItems fetches a batch of items by id. noteboard has no batch endpoint
-// today, so we fan out concurrent GETs (capped) and return results in input
-// order. Items that 404 are returned as nil entries — callers decide whether
-// to treat them as orphans.
+// GetItems reads a batch in one request, preserving opaque content, input order
+// and null slots for missing/deleted items. A failed batch is never an orphan.
 func (c *Client) GetItems(ids []string) ([]Item, error) {
-	out := make([]Item, len(ids))
-	errs := make([]error, len(ids))
-	const concurrency = 8
-	sem := make(chan struct{}, concurrency)
-	var wg sync.WaitGroup
-	for i, id := range ids {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, id string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			item, err := c.GetItem(id)
-			if err != nil {
-				if isNotFound(err) {
-					out[i] = nil
-					return
-				}
-				errs[i] = err
-				return
-			}
-			out[i] = item
-		}(i, id)
+	if len(ids) == 0 {
+		return []Item{}, nil
 	}
-	wg.Wait()
-	for _, e := range errs {
-		if e != nil {
-			return out, e
+	body, err := json.Marshal(struct {
+		IDs []string `json:"ids"`
+	}{ids})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest("POST", c.BaseURL+"/api/items/batch", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		answer, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("noteboard batch: %s — %s", resp.Status, string(answer))
+	}
+	var result struct {
+		Items []Item `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if len(result.Items) != len(ids) {
+		return nil, fmt.Errorf("noteboard batch returned %d slots for %d ids", len(result.Items), len(ids))
+	}
+	for i, item := range result.Items {
+		if item != nil && item["id"] != ids[i] {
+			return nil, fmt.Errorf("noteboard batch item %d does not match requested id", i)
 		}
 	}
-	return out, nil
+	return result.Items, nil
 }
 
 // Search forwards a full-text query to noteboard /api/search.
@@ -273,6 +281,9 @@ func (c *Client) doJSON(req *http.Request, want int, itemID string) (Item, error
 // GET /api/items/query-options) and its refusal comes back as a
 // *QueryRefusedError for the caller to relay, not to re-judge here.
 type ItemsQuery struct {
+	Q            string   `json:"q,omitempty"`
+	CreatedFrom  string   `json:"created_from,omitempty"`
+	CreatedTo    string   `json:"created_to,omitempty"`
 	IDs          []string `json:"ids"`
 	Tags         []string `json:"tags,omitempty"`
 	Priorities   []int    `json:"priorities,omitempty"`

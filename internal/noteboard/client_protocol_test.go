@@ -672,17 +672,19 @@ func TestDoJSONRejectsABodyThatIsNotAnObject(t *testing.T) {
 // ============================ GetItems ============================
 
 func TestGetItemsReturnsNilForMissingAndKeepsInputOrder(t *testing.T) {
+	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(r.URL.Path, "/api/items/")
-		w.Header().Set("Content-Type", "application/json")
-		if id == "missing" {
-			w.WriteHeader(404)
-			io.WriteString(w, `{"error":"not found"}`)
-			return
+		calls++
+		if r.Method != "POST" || r.URL.Path != "/api/items/batch" {
+			t.Errorf("wrong batch route: %s %s", r.Method, r.URL.Path)
 		}
-		w.WriteHeader(200)
-		io.WriteString(w, `{"id":"`+id+`"}`)
+		io.WriteString(w, `{"items":[{"id":"a"},null,{"id":"c"}]}`)
 	}))
+	t.Cleanup(func() {
+		if calls != 1 {
+			t.Errorf("expected one batch call, got %d", calls)
+		}
+	})
 	defer srv.Close()
 
 	c := New(srv.URL)

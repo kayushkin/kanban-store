@@ -452,6 +452,7 @@ func (s *Store) ListPlacementsByColumn(columnID string, limit, offset int) ([]*m
 // and is not filterable here: this store would have to fetch every item on the
 // board to look, which is the cost paging exists to avoid.
 type CardFilter struct {
+	CardID string
 	// AssigneePrincipalID keeps cards this principal is assigned to.
 	AssigneePrincipalID string
 	// Unassigned keeps cards nobody is assigned to.
@@ -472,6 +473,10 @@ func (f CardFilter) IsEmpty() bool { return f == CardFilter{} }
 func cardFilterConditions(filter CardFilter) (string, []any) {
 	conditions := ""
 	args := []any{}
+	if filter.CardID != "" {
+		conditions += ` AND p.card_id=?`
+		args = append(args, filter.CardID)
+	}
 	if filter.AssigneePrincipalID != "" {
 		conditions += ` AND EXISTS (SELECT 1 FROM card_assignments a WHERE a.card_id=p.card_id AND a.principal_id=?)`
 		args = append(args, filter.AssigneePrincipalID)

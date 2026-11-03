@@ -137,6 +137,7 @@ func (a *API) routes() *http.ServeMux {
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, If-Match, "+PrincipalIDHeader)
 		if r.Method == "OPTIONS" {
@@ -158,6 +159,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func mapDBErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, db.ErrBoardChanged) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, 404, "not found")
 		return
@@ -251,6 +256,11 @@ func (a *API) boardsTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch parts[1] {
+	case "card-page":
+		if len(parts) == 2 {
+			a.boardCardPage(w, r, boardID)
+			return
+		}
 	case "columns":
 		if len(parts) == 2 {
 			a.boardColumns(w, r, boardID)
@@ -341,6 +351,7 @@ func (a *API) boardByID(w http.ResponseWriter, r *http.Request, id string) {
 			mapDBErr(w, err)
 			return
 		}
+		w.Header().Set("ETag", strconv.Quote(b.UpdatedAt.Format(time.RFC3339Nano)))
 		writeJSON(w, 200, b)
 	case "PATCH":
 		var req model.UpdateBoardRequest
@@ -356,11 +367,30 @@ func (a *API) boardByID(w http.ResponseWriter, r *http.Request, id string) {
 			writeSettingsCheckFailure(w, err)
 			return
 		}
-		b, err := a.store.UpdateBoard(id, &req)
+		var expected *time.Time
+		if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && ifMatch != "*" {
+			version, err := strconv.Unquote(ifMatch)
+			if err != nil {
+				writeError(w, 400, "If-Match must be the board's quoted ETag or *")
+				return
+			}
+			parsed, err := time.Parse(time.RFC3339Nano, version)
+			if err != nil {
+				writeError(w, 400, "If-Match must be the board's quoted ETag or *")
+				return
+			}
+			expected = &parsed
+		}
+		b, err := a.store.UpdateBoardIfVersion(id, &req, expected)
+		if errors.Is(err, db.ErrBoardChanged) && r.Header.Get("If-Match") != "" {
+			writeError(w, http.StatusPreconditionFailed, err.Error())
+			return
+		}
 		if err != nil {
 			mapDBErr(w, err)
 			return
 		}
+		w.Header().Set("ETag", strconv.Quote(b.UpdatedAt.Format(time.RFC3339Nano)))
 		writeJSON(w, 200, b)
 	case "DELETE":
 		if err := a.store.DeleteBoard(id); err != nil {
@@ -1456,6 +1486,32 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 		placements = append(placements, page...)
 		items = append(items, pageItems...)
 	}
+	ladder, err := a.store.GetPriorityLadder(boardID)
+	if err != nil {
+		return nil, err
+	}
+	cards, err := a.assembleCards(b, placements, items, ladder, access)
+	if err != nil {
+		return nil, err
+	}
+	byCol := map[string][]model.CardView{}
+	var orphans []model.CardView
+	for i, card := range cards {
+		if items[i] == nil {
+			orphans = append(orphans, card)
+			continue
+		}
+		byCol[card.Placement.ColumnID] = append(byCol[card.Placement.ColumnID], card)
+	}
+	colViews := make([]model.ColumnView, len(cols))
+	for i, c := range cols {
+		colViews[i] = model.ColumnView{Column: c, Cards: byCol[c.ID], Total: totals[c.ID]}
+	}
+	return &model.BoardView{Board: b, Columns: colViews, Orphans: orphans, PriorityLadder: ladder}, nil
+}
+
+// assembleCards joins only the selected page, keeping content untouched.
+func (a *API) assembleCards(b *model.Board, placements []*model.Placement, items []noteboard.Item, ladder *model.PriorityLadder, access *PrincipalBoardAccess) ([]model.CardView, error) {
 	ids := make([]string, len(placements))
 	for i, p := range placements {
 		ids[i] = p.CardID
@@ -1463,7 +1519,7 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 	// Events and links for exactly the cards on screen, one query each. The links
 	// used to be one query per card, which on the largest board here is 6,466 of
 	// them for a single read.
-	eventsByCard, err := a.store.ListCardEventsForCards(ids, boardID)
+	eventsByCard, err := a.store.ListCardEventsForCards(ids, b.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1487,19 +1543,17 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 	if err != nil {
 		return nil, err
 	}
-	ladder, err := a.store.GetPriorityLadder(boardID)
+	labelsByCard, err := a.store.ClassificationLabelsForCards(b.ID, ids)
 	if err != nil {
 		return nil, err
 	}
 	asOf := time.Now().UTC()
 
-	// Bucket by column.
-	byCol := map[string][]model.CardView{}
-	var orphans []model.CardView
+	cards := make([]model.CardView, 0, len(placements))
 	for i, p := range placements {
 		cv := model.CardView{
 			Placement: p, Item: items[i], Links: linksByCard[p.CardID], Assignments: assignmentsByCard[p.CardID],
-			Ticket:    ticketsByCard[p.CardID],
+			Ticket: ticketsByCard[p.CardID], Classification: labelsByCard[p.CardID],
 			WorkState: workStatesByCard[p.CardID].State, WorkStateSource: workStatesByCard[p.CardID].Source,
 		}
 		summary, _ := timeaccounting.Compute(timeaccounting.Input{
@@ -1512,15 +1566,7 @@ func (a *API) assembleBoardView(boardID string, limit int, filter db.CardFilter,
 		// where they belong. A board asks how much time, not which stretches of it.
 		summary.Segments = nil
 		cv.Time = summary
-		if items[i] == nil {
-			orphans = append(orphans, cv)
-			continue
-		}
-		byCol[p.ColumnID] = append(byCol[p.ColumnID], cv)
+		cards = append(cards, cv)
 	}
-	colViews := make([]model.ColumnView, len(cols))
-	for i, c := range cols {
-		colViews[i] = model.ColumnView{Column: c, Cards: byCol[c.ID], Total: totals[c.ID]}
-	}
-	return &model.BoardView{Board: b, Columns: colViews, Orphans: orphans, PriorityLadder: ladder}, nil
+	return cards, nil
 }
