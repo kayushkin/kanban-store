@@ -199,6 +199,14 @@ var EntityTypes = []model.EntityTypeInfo{
 	{Type: "chat_message", Service: "message-store", Get: "/messages/{id}", IDPatterns: []string{`chat_message_\d{6,}`}},
 	{Type: "conversation_day", Service: "message-store", Get: "/conversation-days/{id}", IDPatterns: []string{`conversation_day_\d{6,}`}},
 
+	// An event roster in discord-signup-store (127.0.0.1:8312): one outing or
+	// meeting organized on Discord, with who signed up. The store's ids are
+	// integers; discord_event_000126 is the same id written so it can be cited,
+	// and GET /api/discord-events/{id} takes that form. A journal timeline cites
+	// the events a person went to. No Search: rosters are found on their own
+	// pages.
+	{Type: "discord_event", Service: "discord-signup-store", Get: "/api/discord-events/{id}", IDPatterns: []string{`discord_event_\d{6,}`}},
+
 	// What the operator did online, as activity-store (127.0.0.1:8336) holds
 	// it: one search, page visit, video watched, app used or place looked up,
 	// at one time, imported from Google Takeout. A journal timeline cites the
