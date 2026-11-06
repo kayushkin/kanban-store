@@ -90,6 +90,12 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"message_000123", map[string]bool{"message": true, "chat_message": false}},
 		{"activity_000123", map[string]bool{"activity": true, "trip": false, "visit": false, "photo": false}},
 		{"activity_12", map[string]bool{"activity": false}}, // fewer than six digits
+		{"account_000001", map[string]bool{"budget_account": true, "budget_transaction": false, "principal": false}},
+		{"transaction_000123", map[string]bool{"budget_transaction": true, "budget_account": false}},
+		{"category_000004", map[string]bool{"budget_category": true, "budget_payee": false}},
+		{"payee_000010", map[string]bool{"budget_payee": true, "budget_category": false}},
+		{"import_batch_000001", map[string]bool{"budget_import_batch": true, "budget_account": false}},
+		{"account_12", map[string]bool{"budget_account": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
 		{"repo:dash", map[string]bool{"repo": true, "commit": false}},
 		{"repo:kayushkin.com", map[string]bool{"repo": true}},

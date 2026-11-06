@@ -267,9 +267,30 @@ var EntityTypes = []model.EntityTypeInfo{
 	musicPracticeType("requirement"),
 	musicPracticeType("goal"),
 
+	// The operator's finances, as budget-store (127.0.0.1:8340) holds them:
+	// one row per record kind, each its own table there with its own id
+	// prefix (account_000001, transaction_000001). No Search on any of them:
+	// a mention picker should not page through private finances. A
+	// transaction folded into another by the store's transfer matcher still
+	// answers Get, with the one it was folded into.
+	budgetStoreType("budget_account", "account", "/accounts/{id}", "name"),
+	budgetStoreType("budget_transaction", "transaction", "/transactions/{id}", "description"),
+	budgetStoreType("budget_category", "category", "/categories/{id}", "name"),
+	budgetStoreType("budget_payee", "payee", "/payees/{id}", "name"),
+	budgetStoreType("budget_import_batch", "import_batch", "/import-batches/{id}", "file_name"),
+
 	{Type: "email", Service: "mailstack"},
 	{Type: "email_msgid", Service: "mailstack"},
 	{Type: "email_sender", Service: "mailstack"},
+}
+
+// budgetStoreType is a budget-store record kind's registry row: Get only.
+func budgetStoreType(typeName, idPrefix, get, labelField string) model.EntityTypeInfo {
+	return model.EntityTypeInfo{
+		Type: typeName, Service: "budget-store",
+		Get: get, LabelField: labelField,
+		IDPatterns: []string{idPrefix + `_\d{6,}`},
+	}
 }
 
 // musicPracticeType is a music-practice-store record type's registry row.
