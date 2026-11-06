@@ -96,6 +96,20 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"payee_000010", map[string]bool{"budget_payee": true, "budget_category": false}},
 		{"import_batch_000001", map[string]bool{"budget_import_batch": true, "budget_account": false}},
 		{"account_12", map[string]bool{"budget_account": false}}, // fewer than six digits
+		{"possession_000001", map[string]bool{"possession": true, "possession_question": false, "possession_purchase": false}},
+		{"possession_question_000001", map[string]bool{"possession_question": true, "possession": false}},
+		{"possession_purchase_000001", map[string]bool{"possession_purchase": true, "possession": false}},
+		{"musical_instrument_000001", map[string]bool{"musical_instrument": true, "music_instrument": false}},
+		{"music_instrument_000001", map[string]bool{"music_instrument": true, "musical_instrument": false}},
+		{"computer_part_000001", map[string]bool{"computer_part": true, "computer": false}},
+		{"computer_000001", map[string]bool{"computer": true, "computer_part": false}},
+		{"photo_review_000001", map[string]bool{"photo_review": true, "photo": false}},
+		{"garment_000001", map[string]bool{"garment": true, "outfit": false}},
+		{"outfit_000001", map[string]bool{"outfit": true, "garment": false}},
+		{"audio_device_000001", map[string]bool{"audio_device": true}},
+		{"vehicle_000001", map[string]bool{"vehicle": true}},
+		{"sighting_000001", map[string]bool{"sighting": true, "photo": false}},
+		{"possession_12", map[string]bool{"possession": false}}, // fewer than six digits
 		{"not-an-id", map[string]bool{"session": false, "note": false}},
 		{"repo:dash", map[string]bool{"repo": true, "commit": false}},
 		{"repo:kayushkin.com", map[string]bool{"repo": true}},
@@ -110,6 +124,30 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 			if got := match(byType[typ], c.id); got != want {
 				t.Errorf("id %q against type %q: got %v, want %v", c.id, typ, got, want)
 			}
+		}
+	}
+}
+
+// The chat finds ids in prose with every registry pattern joined into one
+// unanchored alternative between word boundaries (chat-core's refChips), so
+// a prefix that is the start of another type's prefix must still yield the
+// whole id, never a shorter match inside it.
+func TestEntityTypeIDPatternsFindWholeIDsInProse(t *testing.T) {
+	var alternatives []string
+	for _, et := range EntityTypes {
+		for _, p := range et.IDPatterns {
+			alternatives = append(alternatives, "(?:"+p+")")
+		}
+	}
+	scan := regexp.MustCompile(`(?i)\b(` + strings.Join(alternatives, "|") + `)\b`)
+	for _, id := range []string{
+		"possession_000001", "possession_question_000001", "possession_purchase_000001",
+		"musical_instrument_000001", "music_instrument_000001", "computer_part_000001",
+		"photo_review_000001", "chat_message_000001", "conversation_day_000001",
+	} {
+		found := scan.FindAllString("see "+id+", then", -1)
+		if len(found) != 1 || found[0] != id {
+			t.Errorf("in prose, %s was found as %q", id, found)
 		}
 	}
 }

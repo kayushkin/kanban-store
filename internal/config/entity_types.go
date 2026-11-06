@@ -279,6 +279,29 @@ var EntityTypes = []model.EntityTypeInfo{
 	budgetStoreType("budget_payee", "payee", "/payees/{id}", "name"),
 	budgetStoreType("budget_import_batch", "import_batch", "/import-batches/{id}", "file_name"),
 
+	// What the operator owns, as possession-store (127.0.0.1:8341) holds it:
+	// a possession, the kind record that extends one (a garment, a computer…;
+	// its Get answers the whole possession), an outfit of garments, a
+	// purchase, a photo review, a sighting found on a photo, and a question
+	// for the owner about one. Every id is the store's own prefix and six or
+	// more digits. possession_question_ and possession_purchase_ ids do not
+	// match possession_\d{6,}, and musical_instrument_ does not match
+	// music-practice-store's music_instrument_ or the other way round, because
+	// each pattern needs its digit run straight after its own prefix. No
+	// Search: a mention picker should not page through the inventory.
+	possessionStoreType("possession", "possession", "/possessions/{id}"),
+	possessionStoreType("garment", "garment", "/garments/{id}"),
+	possessionStoreType("computer", "computer", "/computers/{id}"),
+	possessionStoreType("computer_part", "computer_part", "/computer-parts/{id}"),
+	possessionStoreType("audio_device", "audio_device", "/audio-devices/{id}"),
+	possessionStoreType("musical_instrument", "musical_instrument", "/musical-instruments/{id}"),
+	possessionStoreType("vehicle", "vehicle", "/vehicles/{id}"),
+	possessionStoreType("outfit", "outfit", "/outfits/{id}"),
+	possessionStoreType("possession_purchase", "possession_purchase", "/purchases/{id}"),
+	possessionStoreType("photo_review", "photo_review", "/photo-reviews/{id}"),
+	possessionStoreType("sighting", "sighting", "/sightings/{id}"),
+	possessionStoreType("possession_question", "possession_question", "/owner-questions/{id}"),
+
 	{Type: "email", Service: "mailstack"},
 	{Type: "email_msgid", Service: "mailstack"},
 	{Type: "email_sender", Service: "mailstack"},
@@ -289,6 +312,15 @@ func budgetStoreType(typeName, idPrefix, get, labelField string) model.EntityTyp
 	return model.EntityTypeInfo{
 		Type: typeName, Service: "budget-store",
 		Get: get, LabelField: labelField,
+		IDPatterns: []string{idPrefix + `_\d{6,}`},
+	}
+}
+
+// possessionStoreType is a possession-store record's registry row: Get only.
+func possessionStoreType(typeName, idPrefix, get string) model.EntityTypeInfo {
+	return model.EntityTypeInfo{
+		Type: typeName, Service: "possession-store",
+		Get:        get,
 		IDPatterns: []string{idPrefix + `_\d{6,}`},
 	}
 }
