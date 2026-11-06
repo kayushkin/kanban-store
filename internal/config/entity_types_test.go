@@ -92,6 +92,7 @@ func TestEntityTypeIDPatternsClassifySampleIDs(t *testing.T) {
 		{"activity_12", map[string]bool{"activity": false}}, // fewer than six digits
 		{"discord_event_000126", map[string]bool{"discord_event": true, "activity": false}},
 		{"discord_event_126", map[string]bool{"discord_event": false}}, // fewer than six digits
+		{"calendar_event_000001", map[string]bool{"calendar_event": true, "discord_event": false}},
 		{"account_000001", map[string]bool{"budget_account": true, "budget_transaction": false, "principal": false}},
 		{"transaction_000123", map[string]bool{"budget_transaction": true, "budget_account": false}},
 		{"category_000004", map[string]bool{"budget_category": true, "budget_payee": false}},

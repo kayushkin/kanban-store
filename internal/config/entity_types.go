@@ -207,6 +207,13 @@ var EntityTypes = []model.EntityTypeInfo{
 	// pages.
 	{Type: "discord_event", Service: "discord-signup-store", Get: "/api/discord-events/{id}", IDPatterns: []string{`discord_event_\d{6,}`}},
 
+	// A calendar event as calendar-store (127.0.0.1:8342) keeps it: one VEVENT
+	// of an imported calendar, whole, with the people it was with. The store
+	// mints calendar_event_000001; the pattern does not match inside
+	// discord_event_… or any other id at a word boundary. No Search: calendars
+	// are private, and a mention picker should not page through them.
+	{Type: "calendar_event", Service: "calendar-store", Get: "/events/{id}", IDPatterns: []string{`calendar_event_\d{6,}`}},
+
 	// What the operator did online, as activity-store (127.0.0.1:8336) holds
 	// it: one search, page visit, video watched, app used or place looked up,
 	// at one time, imported from Google Takeout. A journal timeline cites the
