@@ -206,6 +206,10 @@ var EntityTypes = []model.EntityTypeInfo{
 	// the events a person went to. No Search: rosters are found on their own
 	// pages.
 	{Type: "discord_event", Service: "discord-signup-store", Get: "/api/discord-events/{id}", IDPatterns: []string{`discord_event_\d{6,}`}},
+	// One person who went to one date of a discord-signup-store event: the
+	// store records attendance apart from the roster, and a journal timeline
+	// cites the record that says someone went.
+	{Type: "discord_attendance", Service: "discord-signup-store", Get: "/api/discord-attendance/{id}", IDPatterns: []string{`discord_attendance_\d{6,}`}},
 
 	// A calendar event as calendar-store (127.0.0.1:8342) keeps it: one VEVENT
 	// of an imported calendar, whole, with the people it was with. The store
