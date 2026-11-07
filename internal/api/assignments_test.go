@@ -485,26 +485,17 @@ func TestAssignedKindHasNoDefaultClockState(t *testing.T) {
 	}
 }
 
-func TestEntityTypesIncludePrincipal(t *testing.T) {
+func TestEntityTypesAreReferenceStoresListUnchanged(t *testing.T) {
 	h, _, cleanup := setup(t)
 	defer cleanup()
 	w := do(t, h, "GET", "/api/entity-types", nil)
-	var types []model.EntityTypeInfo
+	var types []map[string]any
 	decodeSuccessfulResponse(t, w, &types)
-	for _, et := range types {
-		if et.Type != "principal" {
-			continue
-		}
-		if et.Service != "principal-store" || et.Get != "/principals/{id}" || et.Search != "/principals?q=" {
-			t.Fatalf("principal row is wrong: %+v", et)
-		}
-		if et.SearchResults != "" || et.LabelField != "display_name" {
-			t.Fatalf("principal row: principal-store answers a bare array named by display_name, got search_results %q label_field %q", et.SearchResults, et.LabelField)
-		}
-		if len(et.IDPatterns) != 1 || et.IDPatterns[0] != `principal_\d{6,}` {
-			t.Fatalf("principal id pattern: %v", et.IDPatterns)
-		}
-		return
+	if len(types) != 3 {
+		t.Fatalf("want the fake reference-store's 3 rows, got %d: %s", len(types), w.Body.String())
 	}
-	t.Fatalf("no principal entity type in %+v", types)
+	principal := types[1]
+	if principal["type"] != "principal" || principal["label_field"] != "display_name" || principal["access"] != "grant" {
+		t.Fatalf("a row lost a field on the way through: %+v", principal)
+	}
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,9 +117,16 @@ func (a *API) putCardTicket(w http.ResponseWriter, r *http.Request, cardID strin
 		writeError(w, 400, "source_entity_type and source_entity_ref go together: send both or neither")
 		return
 	}
-	if request.SourceEntityType != "" && !knownEntityType(request.SourceEntityType) {
-		writeError(w, 400, fmt.Sprintf("source_entity_type %q is not in the entity-type registry (GET /api/entity-types)", request.SourceEntityType))
-		return
+	if request.SourceEntityType != "" {
+		known, err := a.knownEntityType(r.Context(), request.SourceEntityType)
+		if err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
+		if !known {
+			writeError(w, 400, fmt.Sprintf("source_entity_type %q is not a reference type (GET /api/entity-types, which is reference-store's list)", request.SourceEntityType))
+			return
+		}
 	}
 
 	_, err = a.store.UpsertTicket(cardID, request.RequesterPrincipalID, channel, request.SourceEntityType, request.SourceEntityRef)
@@ -176,13 +184,12 @@ func (a *API) ticketView(cardID string, access *PrincipalBoardAccess) (*model.Ti
 	return view, nil
 }
 
-func knownEntityType(entityType string) bool {
-	for _, info := range config.EntityTypes {
-		if info.Type == entityType {
-			return true
-		}
+// knownEntityType asks reference-store, which owns the list of types.
+func (a *API) knownEntityType(ctx context.Context, entityType string) (bool, error) {
+	if a.references == nil {
+		return false, fmt.Errorf("kanban-store has no reference-store to check source_entity_type against")
 	}
-	return false
+	return a.references.Known(ctx, entityType)
 }
 
 const (

@@ -554,6 +554,7 @@ func setupWithOwners(t *testing.T, principalStoreURL, llmBridgeServerURL, bundle
 	nb := newFakeNoteboard()
 	srv := httptest.NewServer(nb.handler())
 	a := api.New(store, noteboard.New(srv.URL), principalstore.New(principalStoreURL), llmbridge.New(llmBridgeServerURL), bundlestore.New(bundleStoreURL), settingsRegistryForTests(t))
+	a.SetReferenceStore(fakeReferenceStore(t))
 	// Registered after t.TempDir, so it runs before the directory is removed —
 	// and here rather than only in the returned cleanup, which some callers
 	// discard.

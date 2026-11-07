@@ -49,6 +49,7 @@ const (
 	SettingServiceToken           = "service_token"
 	SettingGrantStoreURL          = "grant_store_url"
 	SettingGrantStoreServiceToken = "grant_store_service_token"
+	SettingReferenceStoreURL      = "reference_store_url"
 )
 
 // The values in force with nothing set. The shipped systemd unit sets the
@@ -61,6 +62,7 @@ const (
 	DefaultListenPort         = 8305
 	DefaultNoteboardURL       = "http://localhost:8191"
 	DefaultPrincipalStoreURL  = "http://127.0.0.1:8314"
+	DefaultReferenceStoreURL  = "http://127.0.0.1:8343"
 	DefaultLLMBridgeServerURL = "http://127.0.0.1:8160"
 	DefaultBundleStoreURL     = "http://127.0.0.1:8307"
 	DefaultAuthStoreURL       = "http://127.0.0.1:8303"
@@ -103,6 +105,8 @@ func SettingDefinitions() []servicesettings.Definition {
 			Description: "Where noteboard answers. A card's title, body, tags and status are a noteboard item, so a wrong address leaves every board with cards it cannot describe."},
 		{Key: SettingPrincipalStoreURL, EnvironmentVariable: "PRINCIPAL_STORE_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultPrincipalStoreURL,
 			Description: "Where principal-store answers. The calling principal is read there on every request, and a principal is checked there before it is assigned to a card; a wrong address answers every principal's request 502."},
+		{Key: SettingReferenceStoreURL, EnvironmentVariable: "REFERENCE_STORE_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultReferenceStoreURL,
+			Description: "Where reference-store answers. It owns the list of reference types, which GET /api/entity-types serves and a ticket's source_entity_type is checked against; a wrong address answers both 502."},
 		{Key: SettingLLMBridgeServerURL, EnvironmentVariable: "LLM_BRIDGE_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultLLMBridgeServerURL,
 			Description: "Where llm-bridge-server answers. A board's default agent and default instance are checked there before either is written. It is the name grant-store, llm-bridge-adapter and dash already read, so one host has one name for the owner."},
 		{Key: SettingBundleStoreURL, EnvironmentVariable: "BUNDLE_STORE_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Default: DefaultBundleStoreURL,
@@ -141,6 +145,7 @@ type Config struct {
 
 	NoteboardURL       string
 	PrincipalStoreURL  string
+	ReferenceStoreURL  string
 	LLMBridgeServerURL string
 	BundleStoreURL     string
 
@@ -173,6 +178,7 @@ func Load(registry *servicesettings.Registry) (Config, error) {
 		DatabasePath:           registry.String(SettingDatabasePath),
 		NoteboardURL:           registry.String(SettingNoteboardURL),
 		PrincipalStoreURL:      registry.String(SettingPrincipalStoreURL),
+		ReferenceStoreURL:      registry.String(SettingReferenceStoreURL),
 		LLMBridgeServerURL:     registry.String(SettingLLMBridgeServerURL),
 		BundleStoreURL:         registry.String(SettingBundleStoreURL),
 		FileStoreURL:           registry.String(SettingFileStoreURL),

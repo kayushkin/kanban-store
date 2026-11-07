@@ -102,6 +102,7 @@ func setupWithPrincipalEnforcement(t *testing.T) (http.Handler, *fakeGrantStore,
 	notes := httptest.NewServer(newFakeNoteboard().handler())
 	t.Cleanup(notes.Close)
 	a := api.New(store, noteboard.New(notes.URL), principalstore.New(principals.URL), llmbridge.New(bridge.URL), bundlestore.New(bundles.URL), settingsRegistryForTests(t))
+	a.SetReferenceStore(fakeReferenceStore(t))
 	// Cleanups run last-registered first, so this waits for trigger
 	// dispatches before the store above is closed.
 	t.Cleanup(a.WaitForMessageTriggers)
@@ -370,6 +371,7 @@ func TestGrantStoreDownRefusesRatherThanServing(t *testing.T) {
 	closedURL := closed.URL
 	closed.Close()
 	a := api.New(store, noteboard.New(closedURL), principalstore.New(closedURL), llmbridge.New(closedURL), bundlestore.New(closedURL), settingsRegistryForTests(t))
+	a.SetReferenceStore(fakeReferenceStore(t))
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{ServiceToken: testServiceToken, Grants: grantstore.New(closedURL, "")})
 	mustStatus(t, requestAs(t, a.Handler(), asPrincipal(alice), "GET", "/api/boards", nil), 502, "grant-store unreachable")
 }

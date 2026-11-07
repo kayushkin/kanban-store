@@ -16,6 +16,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/multichat"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
+	"github.com/kayushkin/kanban-store/internal/referencestore"
 	"github.com/kayushkin/llm-bridge/servicesettings"
 )
 
@@ -40,6 +41,7 @@ func main() {
 
 	nb := noteboard.New(cfg.NoteboardURL)
 	a := api.New(store, nb, principalstore.New(cfg.PrincipalStoreURL), llmbridge.New(cfg.LLMBridgeServerURL), bundlestore.New(cfg.BundleStoreURL), settings)
+	a.SetReferenceStore(referencestore.New(cfg.ReferenceStoreURL))
 
 	// Attachments live in file-store. Without it this store has none, and the
 	// attachment routes answer 503 rather than report that a card has no files.

@@ -151,6 +151,7 @@ func setupWithAttachments(t *testing.T) (http.Handler, *fakeGrantStore, *fakeFil
 	}
 	t.Cleanup(func() { store.Close() })
 	a := api.New(store, noteboard.New(urls["notes"]), principalstore.New(urls["principals"]), llmbridge.New(urls["bridge"]), bundlestore.New(urls["bundles"]), settingsRegistryForTests(t))
+	a.SetReferenceStore(fakeReferenceStore(t))
 	// Cleanups run last-registered first, so this waits for trigger
 	// dispatches before the store above is closed.
 	t.Cleanup(a.WaitForMessageTriggers)

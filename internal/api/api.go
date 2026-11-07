@@ -19,6 +19,7 @@ import (
 	"github.com/kayushkin/kanban-store/internal/model"
 	"github.com/kayushkin/kanban-store/internal/noteboard"
 	"github.com/kayushkin/kanban-store/internal/principalstore"
+	"github.com/kayushkin/kanban-store/internal/referencestore"
 	"github.com/kayushkin/kanban-store/internal/timeaccounting"
 	"github.com/kayushkin/llm-bridge/servicesettings"
 )
@@ -30,6 +31,8 @@ type API struct {
 	// card. See internal/principalstore for why this otherwise-dumb store checks
 	// that one reference.
 	principals *principalstore.Client
+	// references is reference-store, which owns the list of reference types.
+	references *referencestore.Client
 	// bridge is consulted on one write: setting a board's default agent or
 	// default instance. See internal/llmbridge for why.
 	bridge *llmbridge.Client
@@ -1320,13 +1323,28 @@ func (a *API) entityTagOne(w http.ResponseWriter, r *http.Request, etype, eref, 
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
+// entityTypes serves reference-store's list of reference types unchanged, for
+// the clients that have always read it here.
 func (a *API) entityTypes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		writeError(w, 405, "method not allowed")
 		return
 	}
-	writeJSON(w, 200, config.EntityTypes)
+	if a.references == nil {
+		writeError(w, 503, "kanban-store has no reference-store to read the list of types from")
+		return
+	}
+	rows, err := a.references.Types(r.Context())
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, rows)
 }
+
+// SetReferenceStore gives the API reference-store, which owns the list of
+// reference types.
+func (a *API) SetReferenceStore(references *referencestore.Client) { a.references = references }
 
 func (a *API) allTags(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

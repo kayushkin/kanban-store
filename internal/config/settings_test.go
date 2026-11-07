@@ -65,6 +65,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		DatabasePath:           "/home/someone/.kanban-store/kanban-store.db",
 		NoteboardURL:           "http://localhost:8191",
 		PrincipalStoreURL:      "http://127.0.0.1:8314",
+		ReferenceStoreURL:      "http://127.0.0.1:8343",
 		LLMBridgeServerURL:     "http://127.0.0.1:8160",
 		BundleStoreURL:         "http://127.0.0.1:8307",
 		FileStoreURL:           "",
@@ -86,6 +87,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		DatabasePath:           "/srv/kanban-store.db",
 		NoteboardURL:           "http://notes.example:1",
 		PrincipalStoreURL:      "http://principals.example:1",
+		ReferenceStoreURL:      "http://references.example:1",
 		LLMBridgeServerURL:     "http://bridge.example:1",
 		BundleStoreURL:         "http://bundles.example:1",
 		FileStoreURL:           "http://files.example:1",
@@ -103,6 +105,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		"KANBAN_DB":                  "/srv/kanban-store.db",
 		"KANBAN_NOTEBOARD_URL":       "http://notes.example:1",
 		"PRINCIPAL_STORE_URL":        "http://principals.example:1",
+		"REFERENCE_STORE_URL":        "http://references.example:1",
 		"LLM_BRIDGE_URL":             "http://bridge.example:1",
 		"BUNDLE_STORE_URL":           "http://bundles.example:1",
 		"FILE_STORE_URL":             "http://files.example:1",
@@ -129,7 +132,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 // Every declared variable is set to a value of its own above. If a setting is
 // added and that test is not told, this fails.
 func TestTheSameValuesTestCoversEveryDeclaredSetting(t *testing.T) {
-	if got, want := len(SettingDefinitions()), 15; got != want {
+	if got, want := len(SettingDefinitions()), 16; got != want {
 		t.Fatalf("%d settings are declared and TestLoadReadsTheSameValuesItAlwaysDid sets %d: add the new one there, then change this number", got, want)
 	}
 }
