@@ -652,36 +652,6 @@ type EntityCardView struct {
 	WorkStateSource *CardWorkStateSource `json:"work_state_source,omitempty"`
 }
 
-type EntityTypeInfo struct {
-	Type    string `json:"type"`
-	Service string `json:"service,omitempty"`
-	Search  string `json:"search,omitempty"`
-	// Get is the owning service's fetch-one-by-id route, relative to the
-	// service root, with "{id}" marking where the id goes (e.g.
-	// "/api/items/{id}"). Empty means the service has no by-id lookup for this
-	// type, so a reference resolver cannot probe it.
-	Get string `json:"get,omitempty"`
-	// IDPatterns are case-insensitive regular expressions describing what this
-	// type's ids look like, matched against the WHOLE candidate id (resolvers
-	// anchor them). A reference resolver probes an id against every type whose
-	// pattern matches. Empty means ids of this type have no recognizable shape
-	// and are never probed.
-	IDPatterns []string `json:"id_patterns,omitempty"`
-	// SearchResults is the key of the Search answer's object that holds the
-	// array of records (prediction-store answers {"predictions":[…],"total":n},
-	// so "predictions"). Empty means the answer is itself the array. Every
-	// record in that array, and the Get answer, carries its id in its "id"
-	// field.
-	SearchResults string `json:"search_results,omitempty"`
-	// LabelField is the field of each record — in the Search answer and in the
-	// Get answer — whose value names the record for a person ("title",
-	// "display_name", "name", "claim"). It may be empty on a given record (a
-	// journal entry may have no title). Every row with Search, Get and
-	// IDPatterns carries one, so a client can offer its records as mentions
-	// without a list of its own.
-	LabelField string `json:"label_field,omitempty"`
-}
-
 type TagCount struct {
 	Tag   string `json:"tag"`
 	Count int    `json:"count"`
