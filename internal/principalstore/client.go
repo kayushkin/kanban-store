@@ -33,6 +33,20 @@ import (
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// BridgeServiceToken is llm-bridge-server's service token, sent in
+	// X-LLM-Bridge-Service-Token when llm-bridge-server serves principal-store in its own process. Empty sends none.
+	BridgeServiceToken string
+}
+
+// BridgeServiceTokenHeader is where llm-bridge-server reads its service token.
+const BridgeServiceTokenHeader = "X-LLM-Bridge-Service-Token"
+
+// do sends a request, with the bridge's token when the bridge serves the store.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.BridgeServiceToken != "" {
+		req.Header.Set(BridgeServiceTokenHeader, c.BridgeServiceToken)
+	}
+	return c.HTTP.Do(req)
 }
 
 // New returns a client with the 3-second timeout the assignment write path
@@ -86,7 +100,7 @@ func (c *Client) Get(id string) (*Principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +130,7 @@ func (c *Client) ListAvailableMembers(groupID string, at time.Time) ([]Principal
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}

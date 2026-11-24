@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/kayushkin/llm-bridge/msg"
 	"github.com/kayushkin/llm-bridge/servicesettings"
@@ -30,6 +32,7 @@ var OwnedEnvironmentVariablePrefixes = []string{
 	"KANBAN_DB",
 	"KANBAN_NOTEBOARD",
 	"KANBAN_STORE_SERVICE_TOKEN",
+	"KANBAN_BRIDGE_HOSTED",
 }
 
 // Keys of the settings, as GET /settings names them.
@@ -50,6 +53,8 @@ const (
 	SettingGrantStoreURL          = "grant_store_url"
 	SettingGrantStoreServiceToken = "grant_store_service_token"
 	SettingReferenceStoreURL      = "reference_store_url"
+	SettingLLMBridgeServiceToken  = "llm_bridge_service_token"
+	SettingBridgeHostedStores     = "bridge_hosted_stores"
 )
 
 // The values in force with nothing set. The shipped systemd unit sets the
@@ -125,8 +130,12 @@ func SettingDefinitions() []servicesettings.Definition {
 			Description: "The token internal services present in X-Kanban-Store-Service-Token to be past every board check. At least 32 characters, or the service refuses to start. There is no off switch: a store that cannot authorize a caller must not serve boards."},
 		{Key: SettingGrantStoreURL, EnvironmentVariable: "GRANT_STORE_URL", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeString, Required: true,
 			Description: "Where grant-store answers. Board access is read from it on every principal's request. It has no default: a guessed one would start a store that believes it is checking callers and is not."},
-		{Key: SettingGrantStoreServiceToken, EnvironmentVariable: "GRANT_STORE_SERVICE_TOKEN", Kind: msg.ServiceSettingKindSecret, ValueType: msg.ServiceSettingValueTypeString, Required: true,
-			Description: "The token grant-store asks of every caller. At least 32 characters, or the service refuses to start; without it every board read is a 502."},
+		{Key: SettingGrantStoreServiceToken, EnvironmentVariable: "GRANT_STORE_SERVICE_TOKEN", Kind: msg.ServiceSettingKindSecret, ValueType: msg.ServiceSettingValueTypeString,
+			Description: "The token a standalone grant-store asks of every caller. At least 32 characters, or the service refuses to start; without it every board read is a 502. Not needed, and not sent, when KANBAN_BRIDGE_HOSTED_STORES names grant-store."},
+		{Key: SettingLLMBridgeServiceToken, EnvironmentVariable: "LLM_BRIDGE_SERVICE_TOKEN", Kind: msg.ServiceSettingKindSecret, ValueType: msg.ServiceSettingValueTypeString,
+			Description: "llm-bridge-server's service token, sent in X-LLM-Bridge-Service-Token on every call to llm-bridge-server and to the stores KANBAN_BRIDGE_HOSTED_STORES names. The bridge answers nothing without a credential, so unset, the default-agent and default-instance checks are refused. It makes its holder the bridge's unrestricted internal caller."},
+		{Key: SettingBridgeHostedStores, EnvironmentVariable: "KANBAN_BRIDGE_HOSTED_STORES", Kind: msg.ServiceSettingKindWiring, ValueType: msg.ServiceSettingValueTypeStringList,
+			Description: "Which of principal-store, grant-store and bundle-store llm-bridge-server runs in its own process, under its own prefix (PRINCIPAL_STORE_URL then reads like http://127.0.0.1:8160/principal-store). A call to one of them carries LLM_BRIDGE_SERVICE_TOKEN instead of that store's own token, and the service refuses to start when one is named and the token is not set. Empty: all three are standalone."},
 	}
 }
 
@@ -166,6 +175,30 @@ type Config struct {
 	ServiceToken           string
 	GrantStoreURL          string
 	GrantStoreServiceToken string
+
+	// LLMBridgeServiceToken is sent to llm-bridge-server and to the stores in
+	// BridgeHostedStores, which the bridge serves in its own process.
+	LLMBridgeServiceToken string
+	BridgeHostedStores    map[string]bool
+}
+
+// The stores llm-bridge-server can serve in its own process, by the names
+// KANBAN_BRIDGE_HOSTED_STORES uses.
+const (
+	PrincipalStoreName = "principal-store"
+	GrantStoreName     = "grant-store"
+	BundleStoreName    = "bundle-store"
+)
+
+var bridgeHostableStores = []string{PrincipalStoreName, GrantStoreName, BundleStoreName}
+
+// BridgeTokenFor is the bridge's service token when the bridge serves store,
+// and empty when store is a standalone service.
+func (c Config) BridgeTokenFor(store string) string {
+	if c.BridgeHostedStores[store] {
+		return c.LLMBridgeServiceToken
+	}
+	return ""
 }
 
 // Load reads the command's configuration from registry. It fails on a service
@@ -189,6 +222,17 @@ func Load(registry *servicesettings.Registry) (Config, error) {
 		ServiceToken:           registry.String(SettingServiceToken),
 		GrantStoreURL:          registry.String(SettingGrantStoreURL),
 		GrantStoreServiceToken: registry.String(SettingGrantStoreServiceToken),
+		LLMBridgeServiceToken:  registry.String(SettingLLMBridgeServiceToken),
+		BridgeHostedStores:     map[string]bool{},
+	}
+	for _, store := range registry.StringList(SettingBridgeHostedStores) {
+		if !slices.Contains(bridgeHostableStores, store) {
+			return Config{}, fmt.Errorf("KANBAN_BRIDGE_HOSTED_STORES names %q; the stores llm-bridge-server can serve for this one are %s", store, strings.Join(bridgeHostableStores, ", "))
+		}
+		loaded.BridgeHostedStores[store] = true
+	}
+	if len(loaded.BridgeHostedStores) > 0 && loaded.LLMBridgeServiceToken == "" {
+		return Config{}, fmt.Errorf("KANBAN_BRIDGE_HOSTED_STORES is set but LLM_BRIDGE_SERVICE_TOKEN is not: llm-bridge-server answers nothing without a credential")
 	}
 	if len(loaded.ServiceToken) < MinimumServiceTokenLength {
 		return Config{}, fmt.Errorf("KANBAN_STORE_SERVICE_TOKEN must be at least %d characters: internal services present it, and without it every request that omits the header would be unrestricted", MinimumServiceTokenLength)
@@ -196,7 +240,7 @@ func Load(registry *servicesettings.Registry) (Config, error) {
 	if loaded.GrantStoreURL == "" {
 		return Config{}, fmt.Errorf("GRANT_STORE_URL is required: board access is read from grant-store on every request")
 	}
-	if len(loaded.GrantStoreServiceToken) < MinimumServiceTokenLength {
+	if !loaded.BridgeHostedStores[GrantStoreName] && len(loaded.GrantStoreServiceToken) < MinimumServiceTokenLength {
 		return Config{}, fmt.Errorf("GRANT_STORE_SERVICE_TOKEN must be at least %d characters: grant-store gates its own routes and answers a call without it 401", MinimumServiceTokenLength)
 	}
 	if loaded.FileStoreURL != "" && loaded.FileStoreServiceToken == "" {

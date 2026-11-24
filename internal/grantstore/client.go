@@ -44,7 +44,14 @@ type Client struct {
 	// itself, not as the user, and a grant-store that enforces principals
 	// answers 401 without it — which surfaces as a 502 here, never as no grants.
 	ServiceToken string
+	// BridgeServiceToken is llm-bridge-server's service token, set when the
+	// bridge serves grant-store in its own process. It is sent instead of
+	// ServiceToken, which only a standalone grant-store reads.
+	BridgeServiceToken string
 }
+
+// BridgeServiceTokenHeader is where llm-bridge-server reads its service token.
+const BridgeServiceTokenHeader = "X-LLM-Bridge-Service-Token"
 
 // New returns a client with a 3-second timeout, the same budget kanban-store
 // gives its other owner checks. serviceToken may be empty for a grant-store
@@ -54,7 +61,9 @@ func New(baseURL, serviceToken string) *Client {
 }
 
 func (c *Client) send(request *http.Request) (*http.Response, error) {
-	if c.ServiceToken != "" {
+	if c.BridgeServiceToken != "" {
+		request.Header.Set(BridgeServiceTokenHeader, c.BridgeServiceToken)
+	} else if c.ServiceToken != "" {
 		request.Header.Set(ServiceTokenHeader, c.ServiceToken)
 	}
 	return c.HTTP.Do(request)

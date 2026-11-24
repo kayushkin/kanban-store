@@ -21,7 +21,13 @@ import (
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// BridgeServiceToken is llm-bridge-server's service token, sent in
+	// X-LLM-Bridge-Service-Token when llm-bridge-server serves bundle-store in its own process. Empty sends none.
+	BridgeServiceToken string
 }
+
+// BridgeServiceTokenHeader is where llm-bridge-server reads its service token.
+const BridgeServiceTokenHeader = "X-LLM-Bridge-Service-Token"
 
 // New returns a client with the 3-second timeout the board-settings write path
 // budgets for each existence check.
@@ -44,6 +50,9 @@ func (c *Client) CheckBundleExists(id string) error {
 	// The id is the caller's, so every message below names it bounded: the
 	// path as shown, and the URL inside a transport error.
 	shownPath := "/bundles/" + url.PathEscape(boundedtext.Value(id))
+	if c.BridgeServiceToken != "" {
+		req.Header.Set(BridgeServiceTokenHeader, c.BridgeServiceToken)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		var urlError *url.Error

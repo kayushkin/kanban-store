@@ -40,7 +40,15 @@ func main() {
 	defer store.Close()
 
 	nb := noteboard.New(cfg.NoteboardURL)
-	a := api.New(store, nb, principalstore.New(cfg.PrincipalStoreURL), llmbridge.New(cfg.LLMBridgeServerURL), bundlestore.New(cfg.BundleStoreURL), settings)
+	// The bridge answers nothing without a credential, so every call to it, and
+	// to a store it serves in its own process, carries its service token.
+	principals := principalstore.New(cfg.PrincipalStoreURL)
+	principals.BridgeServiceToken = cfg.BridgeTokenFor(config.PrincipalStoreName)
+	bridge := llmbridge.New(cfg.LLMBridgeServerURL)
+	bridge.BridgeServiceToken = cfg.LLMBridgeServiceToken
+	bundles := bundlestore.New(cfg.BundleStoreURL)
+	bundles.BridgeServiceToken = cfg.BridgeTokenFor(config.BundleStoreName)
+	a := api.New(store, nb, principals, bridge, bundles, settings)
 	a.SetReferenceStore(referencestore.New(cfg.ReferenceStoreURL))
 
 	// Attachments live in file-store. Without it this store has none, and the
@@ -64,9 +72,11 @@ func main() {
 		log.Printf("message triggers: MULTICHAT_URL is not set; matching triggers are recorded as not_configured and nothing is sent")
 	}
 
+	grants := grantstore.New(cfg.GrantStoreURL, cfg.GrantStoreServiceToken)
+	grants.BridgeServiceToken = cfg.BridgeTokenFor(config.GrantStoreName)
 	a.SetPrincipalEnforcement(api.PrincipalEnforcement{
 		ServiceToken: cfg.ServiceToken,
-		Grants:       grantstore.New(cfg.GrantStoreURL, cfg.GrantStoreServiceToken),
+		Grants:       grants,
 	})
 	log.Printf("every request needs X-Principal-Id (set by the gateway from a login) or the service token; board grants come from grant-store at %s, and an administrator is past every check", cfg.GrantStoreURL)
 

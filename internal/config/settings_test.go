@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,8 +77,9 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		ServiceToken:           aServiceToken,
 		GrantStoreURL:          "http://grants.example:1",
 		GrantStoreServiceToken: aGrantStoreServiceToken,
+		BridgeHostedStores:     map[string]bool{},
 	}
-	if got := mustLoadFrom(t, requiredVariables(nil)); got != want {
+	if got := mustLoadFrom(t, requiredVariables(nil)); !reflect.DeepEqual(got, want) {
 		t.Errorf("Load with only the required variables set = %+v, want %+v", got, want)
 	}
 
@@ -98,26 +100,30 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 		ServiceToken:           "another-kanban-store-service-token-of-some-length",
 		GrantStoreURL:          "http://other-grants.example:1",
 		GrantStoreServiceToken: "another-grant-store-service-token-of-some-length",
+		LLMBridgeServiceToken:  "a-bridge-service-token",
+		BridgeHostedStores:     map[string]bool{"principal-store": true, "bundle-store": true},
 	}
 	got := mustLoadFrom(t, map[string]string{
-		"KANBAN_LISTEN_HOST":         "192.0.2.1",
-		"KANBAN_PORT":                "9305",
-		"KANBAN_DB":                  "/srv/kanban-store.db",
-		"KANBAN_NOTEBOARD_URL":       "http://notes.example:1",
-		"PRINCIPAL_STORE_URL":        "http://principals.example:1",
-		"REFERENCE_STORE_URL":        "http://references.example:1",
-		"LLM_BRIDGE_URL":             "http://bridge.example:1",
-		"BUNDLE_STORE_URL":           "http://bundles.example:1",
-		"FILE_STORE_URL":             "http://files.example:1",
-		"FILE_STORE_SERVICE_TOKEN":   "a-file-store-token",
-		"MULTICHAT_URL":              "http://multichat.example:1",
-		"AUTH_STORE_URL":             "http://auth.example:1",
-		"AUTH_STORE_TOKEN":           "an-auth-store-token",
-		"KANBAN_STORE_SERVICE_TOKEN": "another-kanban-store-service-token-of-some-length",
-		"GRANT_STORE_URL":            "http://other-grants.example:1",
-		"GRANT_STORE_SERVICE_TOKEN":  "another-grant-store-service-token-of-some-length",
+		"KANBAN_LISTEN_HOST":          "192.0.2.1",
+		"KANBAN_PORT":                 "9305",
+		"KANBAN_DB":                   "/srv/kanban-store.db",
+		"KANBAN_NOTEBOARD_URL":        "http://notes.example:1",
+		"PRINCIPAL_STORE_URL":         "http://principals.example:1",
+		"REFERENCE_STORE_URL":         "http://references.example:1",
+		"LLM_BRIDGE_URL":              "http://bridge.example:1",
+		"BUNDLE_STORE_URL":            "http://bundles.example:1",
+		"FILE_STORE_URL":              "http://files.example:1",
+		"FILE_STORE_SERVICE_TOKEN":    "a-file-store-token",
+		"MULTICHAT_URL":               "http://multichat.example:1",
+		"AUTH_STORE_URL":              "http://auth.example:1",
+		"AUTH_STORE_TOKEN":            "an-auth-store-token",
+		"KANBAN_STORE_SERVICE_TOKEN":  "another-kanban-store-service-token-of-some-length",
+		"GRANT_STORE_URL":             "http://other-grants.example:1",
+		"GRANT_STORE_SERVICE_TOKEN":   "another-grant-store-service-token-of-some-length",
+		"LLM_BRIDGE_SERVICE_TOKEN":    "a-bridge-service-token",
+		"KANBAN_BRIDGE_HOSTED_STORES": "principal-store, bundle-store",
 	})
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load = %+v, want %+v", got, want)
 	}
 
@@ -132,7 +138,7 @@ func TestLoadReadsTheSameValuesItAlwaysDid(t *testing.T) {
 // Every declared variable is set to a value of its own above. If a setting is
 // added and that test is not told, this fails.
 func TestTheSameValuesTestCoversEveryDeclaredSetting(t *testing.T) {
-	if got, want := len(SettingDefinitions()), 16; got != want {
+	if got, want := len(SettingDefinitions()), 18; got != want {
 		t.Fatalf("%d settings are declared and TestLoadReadsTheSameValuesItAlwaysDid sets %d: add the new one there, then change this number", got, want)
 	}
 }
@@ -270,7 +276,7 @@ func TestEverySecretIsAString(t *testing.T) {
 			t.Errorf("%s is a secret with a default", definition.EnvironmentVariable)
 		}
 	}
-	if got, want := strings.Join(secrets, " "), "FILE_STORE_SERVICE_TOKEN AUTH_STORE_TOKEN KANBAN_STORE_SERVICE_TOKEN GRANT_STORE_SERVICE_TOKEN"; got != want {
+	if got, want := strings.Join(secrets, " "), "FILE_STORE_SERVICE_TOKEN AUTH_STORE_TOKEN KANBAN_STORE_SERVICE_TOKEN GRANT_STORE_SERVICE_TOKEN LLM_BRIDGE_SERVICE_TOKEN"; got != want {
 		t.Errorf("secrets declared: %s, want %s", got, want)
 	}
 }
@@ -344,5 +350,24 @@ func TestEveryEnvironmentVariableTheServiceReadsIsDeclared(t *testing.T) {
 	}
 	if filesRead < 3 {
 		t.Fatalf("the scan read %d files; it is not looking at the service", filesRead)
+	}
+}
+
+// A store llm-bridge-server serves takes the bridge's token, so naming one
+// without it is refused, grant-store's own token is then not needed, and a
+// store the bridge cannot serve for this one is refused by name.
+func TestBridgeHostedStoresNeedTheBridgeToken(t *testing.T) {
+	if _, err := loadFrom(requiredVariables(map[string]string{"KANBAN_BRIDGE_HOSTED_STORES": "principal-store"})); err == nil || !strings.Contains(err.Error(), "LLM_BRIDGE_SERVICE_TOKEN") {
+		t.Errorf("a hosted store with no bridge token = %v, want a refusal naming LLM_BRIDGE_SERVICE_TOKEN", err)
+	}
+	if _, err := loadFrom(requiredVariables(map[string]string{"KANBAN_BRIDGE_HOSTED_STORES": "noteboard", "LLM_BRIDGE_SERVICE_TOKEN": "x"})); err == nil || !strings.Contains(err.Error(), "noteboard") {
+		t.Errorf("a store the bridge cannot serve = %v, want a refusal naming it", err)
+	}
+	got, err := loadFrom(requiredVariables(map[string]string{"KANBAN_BRIDGE_HOSTED_STORES": "grant-store", "LLM_BRIDGE_SERVICE_TOKEN": "x", "GRANT_STORE_SERVICE_TOKEN": ""}))
+	if err != nil {
+		t.Fatalf("grant-store in the bridge with no grant-store token: %v", err)
+	}
+	if got.BridgeTokenFor(GrantStoreName) != "x" || got.BridgeTokenFor(PrincipalStoreName) != "" {
+		t.Errorf("bridge tokens: grant-store %q, principal-store %q", got.BridgeTokenFor(GrantStoreName), got.BridgeTokenFor(PrincipalStoreName))
 	}
 }

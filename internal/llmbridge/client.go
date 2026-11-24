@@ -31,6 +31,20 @@ import (
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+	// BridgeServiceToken is llm-bridge-server's service token, sent in
+	// X-LLM-Bridge-Service-Token when set: the bridge answers these checks to nobody without a credential. Empty sends none.
+	BridgeServiceToken string
+}
+
+// BridgeServiceTokenHeader is where llm-bridge-server reads its service token.
+const BridgeServiceTokenHeader = "X-LLM-Bridge-Service-Token"
+
+// do sends a request, with the bridge's token when one is set.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.BridgeServiceToken != "" {
+		req.Header.Set(BridgeServiceTokenHeader, c.BridgeServiceToken)
+	}
+	return c.HTTP.Do(req)
 }
 
 // New returns a client with the 3-second timeout the board-settings write path
@@ -56,7 +70,7 @@ func (c *Client) CheckInstanceExists(id string) error {
 	// The id is the caller's, so every message below names it bounded: the
 	// path as shown, and the URL inside a transport error.
 	shownPath := "/instances/" + url.PathEscape(boundedtext.Value(id))
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		var urlError *url.Error
 		if errors.As(err, &urlError) {
@@ -94,7 +108,7 @@ func (c *Client) CheckAgentExists(id string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
